@@ -1,0 +1,14 @@
+{
+    "name": "administrator/deno2",
+    "autoload": {
+        "psr-4": {
+            "Administrator\\Deno2\\": "src/"
+        }
+    },
+    "require": {
+        "ncjoes/poppler-php": "^1.1",
+        "setasign/fpdi": "^2.6",
+        "tecnickcom/tcpdf": "^6.11",
+        "setasign/fpdf": "^1.8"
+    }
+}

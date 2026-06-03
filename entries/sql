@@ -1,0 +1,238 @@
+-- =====================================================
+-- Database Migration Script
+-- Purpose: Integrate Deno with Job Ticket, Book Packing, and D2M
+-- =====================================================
+
+-- Step 1: Add new columns to deno table
+ALTER TABLE public.deno 
+ADD COLUMN IF NOT EXISTS jt_id integer REFERENCES job_ticket(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS bp_id integer REFERENCES book_packing(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS d2m_id integer REFERENCES d2m(id) ON DELETE SET NULL,
+ADD COLUMN IF NOT EXISTS entry_type VARCHAR(20) DEFAULT 'direct' CHECK (entry_type IN ('direct', 'from_jt', 'from_bp'));
+
+-- Step 2: Add indexes for performance
+CREATE INDEX IF NOT EXISTS idx_deno_jt_id ON public.deno(jt_id);
+CREATE INDEX IF NOT EXISTS idx_deno_bp_id ON public.deno(bp_id);
+CREATE INDEX IF NOT EXISTS idx_deno_d2m_id ON public.deno(d2m_id);
+CREATE INDEX IF NOT EXISTS idx_deno_entry_type ON public.deno(entry_type);
+
+-- Step 3: Add comment for documentation
+COMMENT ON COLUMN public.deno.jt_id IS 'Foreign key to job_ticket table';
+COMMENT ON COLUMN public.deno.bp_id IS 'Foreign key to book_packing table';
+COMMENT ON COLUMN public.deno.d2m_id IS 'Foreign key to d2m table';
+COMMENT ON COLUMN public.deno.entry_type IS 'Type of entry: direct, from_jt, from_bp';
+
+-- Step 4: Update d2m table to ensure proper linking
+ALTER TABLE public.d2m 
+ADD COLUMN IF NOT EXISTS total_quantity integer DEFAULT 0,
+ADD COLUMN IF NOT EXISTS total_books integer DEFAULT 0;
+
+COMMENT ON COLUMN public.d2m.total_quantity IS 'Total quantity of books in this D2M';
+COMMENT ON COLUMN public.d2m.total_books IS 'Total number of different books in this D2M';
+
+-- Step 5: No need for d2m_details - using existing d2m_items table with associated_deno_ids
+-- Just ensure d2m_items has proper foreign key
+ALTER TABLE public.d2m_items 
+DROP CONSTRAINT IF EXISTS d2m_items_book_code_fkey;
+
+ALTER TABLE public.d2m_items 
+ADD CONSTRAINT d2m_items_book_code_fkey 
+FOREIGN KEY (book_code) REFERENCES books(book_code) ON DELETE RESTRICT;
+
+-- Step 6: Create trigger to update d2m totals from d2m_items
+CREATE OR REPLACE FUNCTION update_d2m_totals()
+RETURNS TRIGGER AS $
+BEGIN
+    UPDATE d2m 
+    SET 
+        total_quantity = (
+            SELECT COALESCE(SUM(total_qty), 0) 
+            FROM d2m_items 
+            WHERE d2m_id = COALESCE(NEW.d2m_id, OLD.d2m_id)
+        ),
+        total_books = (
+            SELECT COUNT(*) 
+            FROM d2m_items 
+            WHERE d2m_id = COALESCE(NEW.d2m_id, OLD.d2m_id)
+        )
+    WHERE id = COALESCE(NEW.d2m_id, OLD.d2m_id);
+    
+    RETURN COALESCE(NEW, OLD);
+END;
+$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_update_d2m_totals ON d2m_items;
+CREATE TRIGGER trg_update_d2m_totals
+AFTER INSERT OR UPDATE OR DELETE ON d2m_items
+FOR EACH ROW
+EXECUTE FUNCTION update_d2m_totals();
+
+-- Step 7: Add constraint to ensure deno entry has valid source
+ALTER TABLE public.deno 
+DROP CONSTRAINT IF EXISTS chk_deno_entry_source;
+
+ALTER TABLE public.deno 
+ADD CONSTRAINT chk_deno_entry_source 
+CHECK (
+    (entry_type = 'direct' AND jt_id IS NULL AND bp_id IS NULL) OR
+    (entry_type = 'from_jt' AND jt_id IS NOT NULL AND bp_id IS NULL) OR
+    (entry_type = 'from_bp' AND bp_id IS NOT NULL)
+);
+
+-- Step 8: Create view for easy reporting - using d2m_items instead of d2m_details
+CREATE OR REPLACE VIEW v_deno_full_details AS
+SELECT 
+    d.id as deno_id,
+    d.ref_no,
+    d.book_code,
+    b.book_name,
+    b.class_level,
+    d.deno_date_nep,
+    d.deno_date_eng,
+    d.per_poka_qty,
+    d.poka_qty,
+    d.total_qty,
+    d.quantity_openpcs,
+    d.entry_type,
+    d.created_by,
+    d.received_by,
+    d.verify_by,
+    d.fiscal_year,
+    d.notes,
+    
+    -- Job Ticket Info
+    jt.id as jt_id,
+    jt.job_ticket_code,
+    jt.lot,
+    jt.print_qty as jt_print_qty,
+    jt.status as jt_status,
+    
+    -- Book Packing Info
+    bp.id as bp_id,
+    bp.name as bp_name,
+    bp.p_qty as bp_packed_qty,
+    bp.packing_status as bp_status,
+    
+    -- D2M Info (find d2m that contains this deno_id in associated_deno_ids)
+    (SELECT d2m_id FROM d2m_items 
+     WHERE book_code = d.book_code 
+     AND d.id = ANY(string_to_array(associated_deno_ids, ',')::int[])
+     LIMIT 1) as d2m_item_id,
+    
+    (SELECT d2m.id FROM d2m_items di
+     JOIN d2m ON di.d2m_id = d2m.id
+     WHERE di.book_code = d.book_code 
+     AND d.id = ANY(string_to_array(di.associated_deno_ids, ',')::int[])
+     LIMIT 1) as d2m_id,
+    
+    (SELECT d2m.d2m_no FROM d2m_items di
+     JOIN d2m ON di.d2m_id = d2m.id
+     WHERE di.book_code = d.book_code 
+     AND d.id = ANY(string_to_array(di.associated_deno_ids, ',')::int[])
+     LIMIT 1) as d2m_no,
+     
+    (SELECT d2m.d2m_type FROM d2m_items di
+     JOIN d2m ON di.d2m_id = d2m.id
+     WHERE di.book_code = d.book_code 
+     AND d.id = ANY(string_to_array(di.associated_deno_ids, ',')::int[])
+     LIMIT 1) as d2m_type,
+    
+    (SELECT d2m.status FROM d2m_items di
+     JOIN d2m ON di.d2m_id = d2m.id
+     WHERE di.book_code = d.book_code 
+     AND d.id = ANY(string_to_array(di.associated_deno_ids, ',')::int[])
+     LIMIT 1) as d2m_status,
+    
+    (SELECT d2m.verified_at FROM d2m_items di
+     JOIN d2m ON di.d2m_id = d2m.id
+     WHERE di.book_code = d.book_code 
+     AND d.id = ANY(string_to_array(di.associated_deno_ids, ',')::int[])
+     LIMIT 1) as d2m_verified_at,
+    
+    d.created_at,
+    d.updated_at
+FROM deno d
+LEFT JOIN books b ON d.book_code = b.book_code
+LEFT JOIN job_ticket jt ON d.jt_id = jt.id
+LEFT JOIN book_packing bp ON d.bp_id = bp.id
+WHERE d.deleted_at IS NULL;
+
+COMMENT ON VIEW v_deno_full_details IS 'Complete view of deno entries with related job ticket, book packing, and D2M information';
+
+-- Step 9: Create function to validate deno quantity against source
+CREATE OR REPLACE FUNCTION validate_deno_quantity()
+RETURNS TRIGGER AS $$
+BEGIN
+    -- If entry from book packing, ensure quantity matches
+    IF NEW.entry_type = 'from_bp' AND NEW.bp_id IS NOT NULL THEN
+        IF NEW.total_qty > (SELECT p_qty FROM book_packing WHERE id = NEW.bp_id) THEN
+            RAISE EXCEPTION 'Deno quantity cannot exceed book packing quantity';
+        END IF;
+    END IF;
+    
+    -- If entry from job ticket, ensure quantity doesn't exceed print qty
+    IF NEW.entry_type = 'from_jt' AND NEW.jt_id IS NOT NULL THEN
+        IF NEW.total_qty > (SELECT print_qty FROM job_ticket WHERE id = NEW.jt_id) THEN
+            RAISE EXCEPTION 'Deno quantity cannot exceed job ticket print quantity';
+        END IF;
+    END IF;
+    
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_validate_deno_qty ON deno;
+CREATE TRIGGER trg_validate_deno_qty
+BEFORE INSERT OR UPDATE ON deno
+FOR EACH ROW
+EXECUTE FUNCTION validate_deno_quantity();
+
+-- Step 10: Grant permissions (adjust as needed)
+GRANT SELECT, INSERT, UPDATE ON deno TO PUBLIC;
+GRANT SELECT, INSERT, UPDATE ON d2m_items TO PUBLIC;
+GRANT SELECT ON v_deno_full_details TO PUBLIC;
+
+-- Step 11: Create helper function to check if deno is in any d2m
+CREATE OR REPLACE FUNCTION is_deno_in_d2m(p_deno_id INTEGER)
+RETURNS BOOLEAN AS $
+BEGIN
+    RETURN EXISTS (
+        SELECT 1 FROM d2m_items
+        WHERE p_deno_id = ANY(string_to_array(associated_deno_ids, ',')::int[])
+    );
+END;
+$ LANGUAGE plpgsql;
+
+-- Step 12: Create function to get all denos for a d2m_item
+CREATE OR REPLACE FUNCTION get_denos_for_d2m_item(p_d2m_item_id INTEGER)
+RETURNS TABLE(
+    deno_id INTEGER,
+    ref_no VARCHAR,
+    per_poka_qty BIGINT,
+    poka_qty BIGINT,
+    total_qty BIGINT,
+    quantity_openpcs INTEGER,
+    created_by VARCHAR
+) AS $
+BEGIN
+    RETURN QUERY
+    SELECT 
+        d.id,
+        d.ref_no,
+        d.per_poka_qty,
+        d.poka_qty,
+        d.total_qty,
+        d.quantity_openpcs,
+        d.created_by::VARCHAR
+    FROM deno d
+    WHERE d.id = ANY(
+        SELECT unnest(string_to_array(
+            (SELECT associated_deno_ids FROM d2m_items WHERE id = p_d2m_item_id),
+            ','
+        ))::INTEGER
+    );
+END;
+$ LANGUAGE plpgsql;
+
+-- Migration Complete
+-- Run this script to update your database schema

@@ -1,0 +1,963 @@
+<?php
+ob_start();
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/lib/AuditLogger.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
+
+redirect_if_not_logged_in();
+
+$auditLogger = new AuditLogger($conn, 'DenoCreate', 'Deno');
+$error_message = null;
+$success_message = null;
+
+// Handle form submission
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    try {
+        $conn->beginTransaction();
+        $auditLogger->prepareForAudit();
+        
+        $entry_type = $_POST['entry_type'] ?? 'direct';
+        $action = $_POST['action'] ?? 'create';
+        
+        // Validate required fields based on entry type
+        $required_fields = ['ref_no', 'deno_date_nep', 'deno_date_eng', 'per_poka_qty', 'poka_qty', 'created_by'];
+        
+        if ($entry_type === 'direct') {
+            $required_fields[] = 'book_code';
+        } elseif ($entry_type === 'from_jt') {
+            $required_fields[] = 'jt_id';
+        } elseif ($entry_type === 'from_bp') {
+            $required_fields[] = 'bp_id';
+        }
+        
+        foreach ($required_fields as $field) {
+            if (empty($_POST[$field])) {
+                throw new Exception("Field '{$field}' is required");
+            }
+        }
+        
+        // Get book_code based on entry type
+        $book_code = null;
+        $jt_id = null;
+        $bp_id = null;
+        
+        if ($entry_type === 'direct') {
+            $book_code = $_POST['book_code'];
+        } elseif ($entry_type === 'from_jt') {
+            $jt_id = (int)$_POST['jt_id'];
+            $stmt = $conn->prepare("SELECT b.book_code FROM job_ticket jt LEFT JOIN books b ON jt.book_id = b.book_id WHERE jt.id = :jt_id");
+            $stmt->execute([':jt_id' => $jt_id]);
+            $result = $stmt->fetch();
+            if (!$result) throw new Exception("Job ticket not found");
+            $book_code = $result['book_code'];
+        } elseif ($entry_type === 'from_bp') {
+            $bp_id = (int)$_POST['bp_id'];
+            $stmt = $conn->prepare("SELECT book_code, jt_id FROM book_packing WHERE id = :bp_id");
+            $stmt->execute([':bp_id' => $bp_id]);
+            $result = $stmt->fetch();
+            if (!$result) throw new Exception("Book packing record not found");
+            $book_code = $result['book_code'];
+            $jt_id = $result['jt_id']; // Link to original job ticket as well
+        }
+        
+        if ($action === 'create') {
+            // Check for duplicate ref_no with different dates
+            $check_stmt = $conn->prepare("
+                SELECT deno_date_nep FROM deno 
+                WHERE ref_no = :ref_no AND deno_date_nep != :deno_date_nep AND deleted_at IS NULL
+                LIMIT 1
+            ");
+            $check_stmt->execute([
+                ':ref_no' => $_POST['ref_no'],
+                ':deno_date_nep' => $_POST['deno_date_nep']
+            ]);
+            
+            if ($check_stmt->fetch()) {
+                throw new Exception("Reference number " . htmlspecialchars($_POST['ref_no']) . " already exists with a different date.");
+            }
+            
+            $insert_sql = "
+                INSERT INTO deno (
+                    book_code, ref_no, deno_date_nep, deno_date_eng,
+                    per_poka_qty, poka_qty, quantity_openpcs, notes,
+                    created_by, received_by, verify_by, update_remarks, fiscal_year,
+                    entry_type, jt_id, bp_id
+                ) VALUES (
+                    :book_code, :ref_no, :deno_date_nep, :deno_date_eng,
+                    :per_poka_qty, :poka_qty, :quantity_openpcs, :notes,
+                    :created_by, :received_by, :verify_by, :update_remarks, :fiscal_year,
+                    :entry_type, :jt_id, :bp_id
+                )
+            ";
+            
+            $stmt = $conn->prepare($insert_sql);
+            $stmt->execute([
+                ':book_code' => $book_code,
+                ':ref_no' => $_POST['ref_no'],
+                ':deno_date_nep' => $_POST['deno_date_nep'],
+                ':deno_date_eng' => $_POST['deno_date_eng'],
+                ':per_poka_qty' => $_POST['per_poka_qty'],
+                ':poka_qty' => $_POST['poka_qty'],
+                ':quantity_openpcs' => $_POST['quantity_openpcs'] ?? 0,
+                ':notes' => $_POST['notes'] ?? null,
+                ':created_by' => $_POST['created_by'],
+                ':received_by' => $_POST['received_by'] ?: null,
+                ':verify_by' => $_POST['verify_by'] ?: null,
+                ':update_remarks' => $_POST['update_remarks'] ?? null,
+                ':fiscal_year' => $_POST['fiscal_year'] ?? '2082',
+                ':entry_type' => $entry_type,
+                ':jt_id' => $jt_id,
+                ':bp_id' => $bp_id
+            ]);
+            
+            $success_message = "Deno record created successfully!";
+            
+        } elseif ($action === 'update') {
+            // Similar validation for updates
+            $check_stmt = $conn->prepare("
+                SELECT deno_date_nep FROM deno 
+                WHERE ref_no = :ref_no AND deno_date_nep != :deno_date_nep AND id != :id AND deleted_at IS NULL
+                LIMIT 1
+            ");
+            $check_stmt->execute([
+                ':ref_no' => $_POST['ref_no'],
+                ':deno_date_nep' => $_POST['deno_date_nep'],
+                ':id' => $_POST['id']
+            ]);
+            
+            if ($check_stmt->fetch()) {
+                throw new Exception("Reference number already exists with a different date.");
+            }
+            
+            $update_sql = "
+                UPDATE deno SET 
+                    book_code = :book_code, ref_no = :ref_no, 
+                    deno_date_nep = :deno_date_nep, deno_date_eng = :deno_date_eng,
+                    per_poka_qty = :per_poka_qty, poka_qty = :poka_qty, 
+                    quantity_openpcs = :quantity_openpcs, notes = :notes,
+                    received_by = :received_by, verify_by = :verify_by, 
+                    update_remarks = :update_remarks, fiscal_year = :fiscal_year,
+                    updated_by = :updated_by, entry_type = :entry_type,
+                    jt_id = :jt_id, bp_id = :bp_id
+                WHERE id = :id
+            ";
+            
+            $stmt = $conn->prepare($update_sql);
+            $stmt->execute([
+                ':id' => $_POST['id'],
+                ':book_code' => $book_code,
+                ':ref_no' => $_POST['ref_no'],
+                ':deno_date_nep' => $_POST['deno_date_nep'],
+                ':deno_date_eng' => $_POST['deno_date_eng'],
+                ':per_poka_qty' => $_POST['per_poka_qty'],
+                ':poka_qty' => $_POST['poka_qty'],
+                ':quantity_openpcs' => $_POST['quantity_openpcs'] ?? 0,
+                ':notes' => $_POST['notes'] ?? null,
+                ':received_by' => $_POST['received_by'] ?: null,
+                ':verify_by' => $_POST['verify_by'] ?: null,
+                ':update_remarks' => $_POST['update_remarks'] ?? null,
+                ':fiscal_year' => $_POST['fiscal_year'] ?? '2082',
+                ':updated_by' => $_SESSION['username'] ?? 'system',
+                ':entry_type' => $entry_type,
+                ':jt_id' => $jt_id,
+                ':bp_id' => $bp_id
+            ]);
+            
+            $success_message = "Deno record updated successfully!";
+            
+        } elseif ($action === 'delete') {
+            // Soft delete
+            $stmt = $conn->prepare("UPDATE deno SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id");
+            $stmt->execute([':id' => $_POST['id']]);
+            $success_message = "Deno record deleted successfully!";
+        }
+        
+        $conn->commit();
+        
+    } catch (Exception $e) {
+        $conn->rollBack();
+        $error_message = $e->getMessage();
+    }
+}
+
+// Fetch dropdown data
+$books = $conn->query("SELECT book_code, book_name FROM books ORDER BY book_name")->fetchAll(PDO::FETCH_ASSOC);
+
+$job_tickets = $conn->query("
+    SELECT jt.id, jt.job_ticket_code, jt.lot, jt.print_qty, b.book_name, b.book_code
+    FROM job_ticket jt
+    LEFT JOIN books b ON jt.book_id = b.book_id
+    WHERE jt.status NOT IN ('cancelled', 'completed')
+    ORDER BY jt.created_date DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$book_packings = $conn->query("
+    SELECT bp.id, bp.name, bp.p_qty, bp.book_code, b.book_name, jt.job_ticket_code
+    FROM book_packing bp
+    LEFT JOIN books b ON bp.book_code = b.book_code
+    LEFT JOIN job_ticket jt ON bp.jt_id = jt.id
+    WHERE bp.status = true
+    ORDER BY bp.created_date DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// Fetch latest Deno records
+$deno_records = $conn->query("
+    SELECT * FROM v_deno_full_details
+    ORDER BY created_at DESC 
+    LIMIT 20
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// Get record for editing if edit_id is provided
+$edit_record = null;
+if (isset($_GET['edit_id'])) {
+    $stmt = $conn->prepare("SELECT * FROM deno WHERE id = :id AND deleted_at IS NULL");
+    $stmt->execute([':id' => $_GET['edit_id']]);
+    $edit_record = $stmt->fetch(PDO::FETCH_ASSOC);
+}
+?>
+
+<style>
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #f5f7fa;
+}
+
+.container {
+    max-width: 1400px;
+    margin: 0 auto;
+    padding: 20px;
+}
+
+.page-header {
+    margin-bottom: 30px;
+}
+
+.page-title {
+    font-size: 28px;
+    font-weight: 700;
+    color: #333;
+    margin-bottom: 10px;
+}
+
+.form-container {
+    background: white;
+    border-radius: 12px;
+    padding: 30px;
+    margin-bottom: 30px;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.entry-type-selector {
+    display: flex;
+    gap: 15px;
+    margin-bottom: 30px;
+    padding: 20px;
+    background: #f8f9fa;
+    border-radius: 8px;
+}
+
+.entry-type-option {
+    flex: 1;
+    position: relative;
+}
+
+.entry-type-option input[type="radio"] {
+    position: absolute;
+    opacity: 0;
+}
+
+.entry-type-option label {
+    display: block;
+    padding: 20px;
+    background: white;
+    border: 2px solid #dee2e6;
+    border-radius: 8px;
+    cursor: pointer;
+    text-align: center;
+    transition: all 0.3s ease;
+}
+
+.entry-type-option input[type="radio"]:checked + label {
+    border-color: #007bff;
+    background: #e7f3ff;
+    font-weight: 600;
+}
+
+.entry-type-option label:hover {
+    border-color: #007bff;
+}
+
+.entry-type-icon {
+    font-size: 32px;
+    margin-bottom: 10px;
+}
+
+.entry-type-title {
+    font-size: 16px;
+    font-weight: 600;
+    margin-bottom: 5px;
+}
+
+.entry-type-desc {
+    font-size: 12px;
+    color: #6c757d;
+}
+
+.form-section {
+    margin-bottom: 30px;
+}
+
+.section-title {
+    font-size: 18px;
+    font-weight: 600;
+    margin-bottom: 20px;
+    color: #333;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding-bottom: 10px;
+    border-bottom: 2px solid #e9ecef;
+}
+
+.form-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 20px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+}
+
+.form-group label {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: #495057;
+}
+
+.form-group label .required {
+    color: #dc3545;
+}
+
+.form-control {
+    padding: 10px 14px;
+    border: 1px solid #ced4da;
+    border-radius: 6px;
+    font-size: 14px;
+    transition: all 0.3s ease;
+}
+
+.form-control:focus {
+    outline: none;
+    border-color: #007bff;
+    box-shadow: 0 0 0 3px rgba(0,123,255,0.1);
+}
+
+.info-box {
+    background: #e7f3ff;
+    border: 1px solid #b3d9ff;
+    border-radius: 8px;
+    padding: 15px;
+    margin-top: 10px;
+}
+
+.info-box.hidden {
+    display: none;
+}
+
+.info-row {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 13px;
+}
+
+.info-label {
+    font-weight: 600;
+    color: #0066cc;
+}
+
+.info-value {
+    color: #333;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    transition: all 0.2s ease;
+}
+
+.btn-primary {
+    background: #007bff;
+    color: white;
+}
+
+.btn-success {
+    background: #28a745;
+    color: white;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-warning {
+    background: #ffc107;
+    color: #212529;
+}
+
+.btn-danger {
+    background: #dc3545;
+    color: white;
+}
+
+.btn-sm {
+    padding: 6px 12px;
+    font-size: 12px;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
+}
+
+.form-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #e9ecef;
+}
+
+.alert {
+    padding: 15px 20px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    font-size: 14px;
+}
+
+.alert-success {
+    background: #d4edda;
+    color: #155724;
+    border: 1px solid #c3e6cb;
+}
+
+.alert-danger {
+    background: #f8d7da;
+    color: #721c24;
+    border: 1px solid #f5c6cb;
+}
+
+.data-table-container {
+    background: white;
+    border-radius: 12px;
+    overflow: hidden;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+}
+
+.data-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.data-table thead {
+    background: #f8f9fa;
+}
+
+.data-table th {
+    padding: 12px;
+    text-align: left;
+    font-size: 12px;
+    font-weight: 700;
+    color: #495057;
+    text-transform: uppercase;
+    border-bottom: 2px solid #dee2e6;
+}
+
+.data-table td {
+    padding: 12px;
+    font-size: 14px;
+    border-bottom: 1px solid #f0f0f0;
+}
+
+.data-table tbody tr:hover {
+    background: #f8f9fa;
+}
+
+.badge {
+    display: inline-block;
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.badge-direct {
+    background: #cce5ff;
+    color: #004085;
+}
+
+.badge-from-jt {
+    background: #d4edda;
+    color: #155724;
+}
+
+.badge-from-bp {
+    background: #fff3cd;
+    color: #856404;
+}
+</style>
+
+<div class="container">
+    <div class="page-header">
+        <h1 class="page-title">📝 <?= $edit_record ? 'Edit' : 'Create' ?> Deno Entry</h1>
+    </div>
+
+    <?php if ($success_message): ?>
+        <div class="alert alert-success">✅ <?= htmlspecialchars($success_message) ?></div>
+    <?php endif; ?>
+
+    <?php if ($error_message): ?>
+        <div class="alert alert-danger">❌ <?= htmlspecialchars($error_message) ?></div>
+    <?php endif; ?>
+
+    <div class="form-container">
+        <form method="POST" id="denoForm">
+            <input type="hidden" name="action" value="<?= $edit_record ? 'update' : 'create' ?>">
+            <?php if ($edit_record): ?>
+                <input type="hidden" name="id" value="<?= $edit_record['id'] ?>">
+            <?php endif; ?>
+
+            <!-- Entry Type Selector -->
+            <div class="entry-type-selector">
+                <div class="entry-type-option">
+                    <input type="radio" name="entry_type" id="type_direct" value="direct" 
+                           <?= (!$edit_record || $edit_record['entry_type'] === 'direct') ? 'checked' : '' ?>>
+                    <label for="type_direct">
+                        <div class="entry-type-icon">📚</div>
+                        <div class="entry-type-title">Direct Entry</div>
+                        <div class="entry-type-desc">Manual book entry</div>
+                    </label>
+                </div>
+
+                <div class="entry-type-option">
+                    <input type="radio" name="entry_type" id="type_from_jt" value="from_jt"
+                           <?= ($edit_record && $edit_record['entry_type'] === 'from_jt') ? 'checked' : '' ?>>
+                    <label for="type_from_jt">
+                        <div class="entry-type-icon">🎫</div>
+                        <div class="entry-type-title">From Job Ticket</div>
+                        <div class="entry-type-desc">Link to existing JT</div>
+                    </label>
+                </div>
+
+                <div class="entry-type-option">
+                    <input type="radio" name="entry_type" id="type_from_bp" value="from_bp"
+                           <?= ($edit_record && $edit_record['entry_type'] === 'from_bp') ? 'checked' : '' ?>>
+                    <label for="type_from_bp">
+                        <div class="entry-type-icon">📦</div>
+                        <div class="entry-type-title">From Book Packing</div>
+                        <div class="entry-type-desc">Link to packing record</div>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Source Selection Section -->
+            <div class="form-section" id="source_section">
+                <!-- Direct Entry - Book Selection -->
+                <div id="direct_source" class="source-panel">
+                    <div class="section-title">📚 Book Information</div>
+                    <div class="form-grid">
+                        <div class="form-group">
+                            <label for="book_code_direct">Book <span class="required">*</span></label>
+                            <select name="book_code" id="book_code_direct" class="form-control">
+                                <option value="">Select Book</option>
+                                <?php foreach ($books as $book): ?>
+                                    <option value="<?= $book['book_code'] ?>"
+                                            <?= ($edit_record && $edit_record['book_code'] === $book['book_code']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($book['book_name']) ?> (<?= $book['book_code'] ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- From Job Ticket -->
+                <div id="jt_source" class="source-panel hidden">
+                    <div class="section-title">🎫 Job Ticket Selection</div>
+                    <div class="form-grid">
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label for="jt_id">Job Ticket <span class="required">*</span></label>
+                            <select name="jt_id" id="jt_id" class="form-control">
+                                <option value="">Select Job Ticket</option>
+                                <?php foreach ($job_tickets as $jt): ?>
+                                    <option value="<?= $jt['id'] ?>"
+                                            data-book-code="<?= htmlspecialchars($jt['book_code']) ?>"
+                                            data-book-name="<?= htmlspecialchars($jt['book_name']) ?>"
+                                            data-lot="<?= htmlspecialchars($jt['lot']) ?>"
+                                            data-print-qty="<?= $jt['print_qty'] ?>"
+                                            <?= ($edit_record && $edit_record['jt_id'] == $jt['id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($jt['job_ticket_code']) ?> - <?= htmlspecialchars($jt['book_name']) ?> (Qty: <?= number_format($jt['print_qty']) ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="info-box hidden" id="jt_info">
+                                <div class="info-row">
+                                    <span class="info-label">Book Code:</span>
+                                    <span class="info-value" id="jt_book_code">-</span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="info-label">Book Name:</span>
+                                    <span class="info-value" id="jt_book_name">-</span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="info-label">Lot:</span>
+                                    <span class="info-value" id="jt_lot">-</span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="info-label">Print Quantity:</span>
+                                    <span class="info-value" id="jt_print_qty">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- From Book Packing -->
+                <div id="bp_source" class="source-panel hidden">
+                    <div class="section-title">📦 Book Packing Selection</div>
+                    <div class="form-grid">
+                        <div class="form-group" style="grid-column: 1 / -1;">
+                            <label for="bp_id">Book Packing Record <span class="required">*</span></label>
+                            <select name="bp_id" id="bp_id" class="form-control">
+                                <option value="">Select Book Packing</option>
+                                <?php foreach ($book_packings as $bp): ?>
+                                    <option value="<?= $bp['id'] ?>"
+                                            data-book-code="<?= htmlspecialchars($bp['book_code']) ?>"
+                                            data-book-name="<?= htmlspecialchars($bp['book_name']) ?>"
+                                            data-jt-code="<?= htmlspecialchars($bp['job_ticket_code']) ?>"
+                                            data-packed-qty="<?= $bp['p_qty'] ?>"
+                                            <?= ($edit_record && $edit_record['bp_id'] == $bp['id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($bp['name']) ?> - <?= htmlspecialchars($bp['book_name']) ?> (Qty: <?= number_format($bp['p_qty']) ?>)
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="info-box hidden" id="bp_info">
+                                <div class="info-row">
+                                    <span class="info-label">Book Code:</span>
+                                    <span class="info-value" id="bp_book_code">-</span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="info-label">Book Name:</span>
+                                    <span class="info-value" id="bp_book_name">-</span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="info-label">Job Ticket:</span>
+                                    <span class="info-value" id="bp_jt_code">-</span>
+                                </div>
+                                <div class="info-row">
+                                    <span class="info-label">Packed Quantity:</span>
+                                    <span class="info-value" id="bp_packed_qty">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Deno Details Section -->
+            <div class="form-section">
+                <div class="section-title">📋 Deno Details</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="ref_no">Reference No <span class="required">*</span></label>
+                        <input type="text" name="ref_no" id="ref_no" class="form-control"
+                               value="<?= htmlspecialchars($edit_record['ref_no'] ?? '') ?>" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="deno_date_nep">Nepali Date <span class="required">*</span></label>
+                        <input type="text" name="deno_date_nep" id="deno_date_nep" class="form-control"
+                               pattern="\d{4}\.\d{2}\.\d{2}" placeholder="YYYY.MM.DD"
+                               value="<?= htmlspecialchars($edit_record['deno_date_nep'] ?? '') ?>" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="deno_date_eng">English Date <span class="required">*</span></label>
+                        <input type="text" name="deno_date_eng" id="deno_date_eng" class="form-control"
+                               pattern="\d{4}\.\d{2}\.\d{2}" placeholder="YYYY.MM.DD"
+                               value="<?= htmlspecialchars($edit_record['deno_date_eng'] ?? '') ?>" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="fiscal_year">Fiscal Year <span class="required">*</span></label>
+                        <select name="fiscal_year" id="fiscal_year" class="form-control" required>
+                            <option value="2082" <?= (!$edit_record || $edit_record['fiscal_year'] === '2082') ? 'selected' : '' ?>>2082</option>
+                            <option value="2083" <?= ($edit_record && $edit_record['fiscal_year'] === '2083') ? 'selected' : '' ?>>2083</option>
+                            <option value="2084" <?= ($edit_record && $edit_record['fiscal_year'] === '2084') ? 'selected' : '' ?>>2084</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="per_poka_qty">Quantity per Poka <span class="required">*</span></label>
+                        <input type="number" name="per_poka_qty" id="per_poka_qty" class="form-control"
+                               value="<?= htmlspecialchars($edit_record['per_poka_qty'] ?? '') ?>" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="poka_qty">Number of Pokas <span class="required">*</span></label>
+                        <input type="number" name="poka_qty" id="poka_qty" class="form-control"
+                               value="<?= htmlspecialchars($edit_record['poka_qty'] ?? '') ?>" required>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="quantity_openpcs">Open Pieces</label>
+                        <input type="number" name="quantity_openpcs" id="quantity_openpcs" class="form-control"
+                               value="<?= htmlspecialchars($edit_record['quantity_openpcs'] ?? '0') ?>">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Total Quantity</label>
+                        <input type="text" id="total_qty_display" class="form-control" readonly
+                               style="background: #e9ecef; font-weight: 600;" value="0">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Personnel Section -->
+            <div class="form-section">
+                <div class="section-title">👥 Personnel Information</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label for="created_by">Created By <span class="required">*</span></label>
+                        <select name="created_by" id="created_by" class="form-control" required>
+                            <option value="">Select</option>
+                            <option value="usha" <?= ($edit_record['created_by'] ?? '') === 'usha' ? 'selected' : '' ?>>Usha</option>
+                            <option value="sanam" <?= ($edit_record['created_by'] ?? '') === 'sanam' ? 'selected' : '' ?>>Sanam</option>
+                            <option value="Durba Raj Panta" <?= ($edit_record['created_by'] ?? '') === 'Durba Raj Panta' ? 'selected' : '' ?>>Durba Raj Panta</option>
+                            <option value="Babu Raja Shrestha" <?= ($edit_record['created_by'] ?? '') === 'Babu Raja Shrestha' ? 'selected' : '' ?>>Babu Raja Shrestha</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="received_by">Received By</label>
+                        <select name="received_by" id="received_by" class="form-control">
+                            <option value="">Select</option>
+                            <option value="sarala" <?= ($edit_record['received_by'] ?? '') === 'sarala' ? 'selected' : '' ?>>Sarala</option>
+                            <option value="dambar" <?= ($edit_record['received_by'] ?? '') === 'dambar' ? 'selected' : '' ?>>Dambar</option>
+                            <option value="Ramesh Kuikel" <?= ($edit_record['received_by'] ?? '') === 'Ramesh Kuikel' ? 'selected' : '' ?>>Ramesh Kuikel</option>
+                            <option value="Balram Acharya" <?= ($edit_record['received_by'] ?? '') === 'Balram Acharya' ? 'selected' : '' ?>>Balram Acharya</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="verify_by">Verified By</label>
+                        <select name="verify_by" id="verify_by" class="form-control">
+                            <option value="">Select</option>
+                            <option value="ram" <?= ($edit_record['verify_by'] ?? '') === 'ram' ? 'selected' : '' ?>>Ram</option>
+                            <option value="shyam" <?= ($edit_record['verify_by'] ?? '') === 'shyam' ? 'selected' : '' ?>>Shyam</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="notes">Notes</label>
+                        <textarea name="notes" id="notes" class="form-control" rows="2"><?= htmlspecialchars($edit_record['notes'] ?? '') ?></textarea>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="update_remarks">Update Remarks</label>
+                        <textarea name="update_remarks" id="update_remarks" class="form-control" rows="2"><?= htmlspecialchars($edit_record['update_remarks'] ?? '') ?></textarea>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Form Actions -->
+            <div class="form-actions">
+                <?php if ($edit_record): ?>
+                    <a href="<?= $_SERVER['PHP_SELF'] ?>" class="btn btn-secondary">Cancel</a>
+                <?php endif; ?>
+                <button type="submit" class="btn btn-primary">
+                    <?= $edit_record ? '💾 Update Deno' : '✅ Create Deno' ?>
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Recent Records Table -->
+    <div class="data-table-container">
+        <table class="data-table">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>Ref No</th>
+                    <th>Type</th>
+                    <th>Book</th>
+                    <th>JT/BP</th>
+                    <th>Date (Nep)</th>
+                    <th>Total Qty</th>
+                    <th>Created By</th>
+                    <th>D2M</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <?php if (empty($deno_records)): ?>
+                    <tr>
+                        <td colspan="10" style="text-align: center; padding: 40px;">No records found</td>
+                    </tr>
+                <?php else: ?>
+                    <?php foreach ($deno_records as $record): ?>
+                        <tr>
+                            <td><?= $record['deno_id'] ?></td>
+                            <td><strong><?= htmlspecialchars($record['ref_no']) ?></strong></td>
+                            <td>
+                                <span class="badge badge-<?= $record['entry_type'] ?>">
+                                    <?= ucfirst(str_replace('_', ' ', $record['entry_type'])) ?>
+                                </span>
+                            </td>
+                            <td>
+                                <div><?= htmlspecialchars($record['book_code']) ?></div>
+                                <small style="color: #6c757d;"><?= htmlspecialchars($record['book_name']) ?></small>
+                            </td>
+                            <td>
+                                <?php if ($record['job_ticket_code']): ?>
+                                    <div>JT: <?= htmlspecialchars($record['job_ticket_code']) ?></div>
+                                <?php endif; ?>
+                                <?php if ($record['bp_name']): ?>
+                                    <div>BP: <?= htmlspecialchars($record['bp_name']) ?></div>
+                                <?php endif; ?>
+                                <?php if (!$record['job_ticket_code'] && !$record['bp_name']): ?>
+                                    <span style="color: #6c757d;">-</span>
+                                <?php endif; ?>
+                            </td>
+                            <td><?= htmlspecialchars($record['deno_date_nep']) ?></td>
+                            <td><strong><?= number_format($record['total_qty']) ?></strong></td>
+                            <td><?= htmlspecialchars($record['created_by']) ?></td>
+                            <td>
+                                <?php if ($record['d2m_no']): ?>
+                                    <div><?= htmlspecialchars($record['d2m_no']) ?></div>
+                                    <small style="color: #6c757d;"><?= htmlspecialchars($record['d2m_status']) ?></small>
+                                <?php else: ?>
+                                    <span style="color: #999;">Not assigned</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <a href="?edit_id=<?= $record['deno_id'] ?>" class="btn btn-warning btn-sm">Edit</a>
+                                <form method="POST" style="display: inline;" 
+                                      onsubmit="return confirm('Are you sure you want to delete this record?')">
+                                    <input type="hidden" name="action" value="delete">
+                                    <input type="hidden" name="id" value="<?= $record['deno_id'] ?>">
+                                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                                </form>
+                            </td>
+                        </tr>
+                    <?php endforeach; ?>
+                <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const entryTypeRadios = document.querySelectorAll('input[name="entry_type"]');
+    const directPanel = document.getElementById('direct_source');
+    const jtPanel = document.getElementById('jt_source');
+    const bpPanel = document.getElementById('bp_source');
+    
+    const jtSelect = document.getElementById('jt_id');
+    const bpSelect = document.getElementById('bp_id');
+    
+    const perPokaQty = document.getElementById('per_poka_qty');
+    const pokaQty = document.getElementById('poka_qty');
+    const openPcs = document.getElementById('quantity_openpcs');
+    const totalDisplay = document.getElementById('total_qty_display');
+    
+    // Show/hide appropriate panel based on entry type
+    function updatePanelVisibility() {
+        const selectedType = document.querySelector('input[name="entry_type"]:checked').value;
+        
+        directPanel.classList.toggle('hidden', selectedType !== 'direct');
+        jtPanel.classList.toggle('hidden', selectedType !== 'from_jt');
+        bpPanel.classList.toggle('hidden', selectedType !== 'from_bp');
+        
+        // Clear required attributes
+        document.getElementById('book_code_direct').required = (selectedType === 'direct');
+        jtSelect.required = (selectedType === 'from_jt');
+        bpSelect.required = (selectedType === 'from_bp');
+    }
+    
+    entryTypeRadios.forEach(radio => {
+        radio.addEventListener('change', updatePanelVisibility);
+    });
+    
+    // Job Ticket selection handler
+    jtSelect.addEventListener('change', function() {
+        const option = this.options[this.selectedIndex];
+        const infoBox = document.getElementById('jt_info');
+        
+        if (this.value) {
+            document.getElementById('jt_book_code').textContent = option.dataset.bookCode || '-';
+            document.getElementById('jt_book_name').textContent = option.dataset.bookName || '-';
+            document.getElementById('jt_lot').textContent = option.dataset.lot || '-';
+            document.getElementById('jt_print_qty').textContent = new Intl.NumberFormat().format(option.dataset.printQty || 0);
+            infoBox.classList.remove('hidden');
+        } else {
+            infoBox.classList.add('hidden');
+        }
+    });
+    
+    // Book Packing selection handler
+    bpSelect.addEventListener('change', function() {
+        const option = this.options[this.selectedIndex];
+        const infoBox = document.getElementById('bp_info');
+        
+        if (this.value) {
+            document.getElementById('bp_book_code').textContent = option.dataset.bookCode || '-';
+            document.getElementById('bp_book_name').textContent = option.dataset.bookName || '-';
+            document.getElementById('bp_jt_code').textContent = option.dataset.jtCode || '-';
+            document.getElementById('bp_packed_qty').textContent = new Intl.NumberFormat().format(option.dataset.packedQty || 0);
+            infoBox.classList.remove('hidden');
+        } else {
+            infoBox.classList.add('hidden');
+        }
+    });
+    
+    // Calculate total quantity
+    function calculateTotal() {
+        const per = parseInt(perPokaQty.value) || 0;
+        const qty = parseInt(pokaQty.value) || 0;
+        const open = parseInt(openPcs.value) || 0;
+        const total = (per * qty) + open;
+        
+        totalDisplay.value = new Intl.NumberFormat().format(total);
+    }
+    
+    perPokaQty.addEventListener('input', calculateTotal);
+    pokaQty.addEventListener('input', calculateTotal);
+    openPcs.addEventListener('input', calculateTotal);
+    
+    // Initialize on page load
+    updatePanelVisibility();
+    calculateTotal();
+    
+    // Trigger change events if editing
+    if (jtSelect.value) jtSelect.dispatchEvent(new Event('change'));
+    if (bpSelect.value) bpSelect.dispatchEvent(new Event('change'));
+});
+</script>
+
+<?php require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/footer.php'; ?>
