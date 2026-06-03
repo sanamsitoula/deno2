@@ -3,7 +3,7 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET');
 
-require_once '../config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 
 $id = isset($_GET['id']) ? intval($_GET['id']) : 0;
 

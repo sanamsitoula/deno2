@@ -1,7 +1,7 @@
 <?php
 ob_start();
-require_once '../../config/database.php';
-require_once '../../includes/header.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 $current_user_id = $_SESSION['user_id'] ?? null;
 $current_employee_id = $_SESSION['employee_id'] ?? null;

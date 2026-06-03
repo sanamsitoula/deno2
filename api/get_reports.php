@@ -3,7 +3,7 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET');
 
-require_once '../config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 
 $type = isset($_GET['type']) ? $_GET['type'] : 'daily';
 $start_date = isset($_GET['start_date']) ? $_GET['start_date'] : '';

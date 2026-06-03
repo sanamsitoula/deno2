@@ -3,7 +3,7 @@ header('Content-Type: application/json');
 header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET');
 
-require_once '../config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 
 // Pagination parameters
 $page = isset($_GET['page']) ? intval($_GET['page']) : 1;

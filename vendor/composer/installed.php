@@ -1,9 +1,9 @@
 <?php return array(
     'root' => array(
         'name' => 'administrator/deno2',
-        'pretty_version' => '1.0.0+no-version-set',
-        'version' => '1.0.0.0',
-        'reference' => null,
+        'pretty_version' => 'dev-master',
+        'version' => 'dev-master',
+        'reference' => 'e1d3d93bdc6a5a6ab2dec6c45fc9d952d120d24a',
         'type' => 'library',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
@@ -11,9 +11,9 @@
     ),
     'versions' => array(
         'administrator/deno2' => array(
-            'pretty_version' => '1.0.0+no-version-set',
-            'version' => '1.0.0.0',
-            'reference' => null,
+            'pretty_version' => 'dev-master',
+            'version' => 'dev-master',
+            'reference' => 'e1d3d93bdc6a5a6ab2dec6c45fc9d952d120d24a',
             'type' => 'library',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),

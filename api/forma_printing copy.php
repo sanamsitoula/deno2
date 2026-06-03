@@ -2,7 +2,7 @@
 /**
  * Forma Printing API
  * File: /deno2/api/forma_printing.php
- * require_once '../config/database.php';
+ * require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
  */
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/api/auth.php';
