@@ -3,447 +3,426 @@ ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
-if (!has_role('admin') && !has_role('finance')) {
+if (!has_role('admin') && !has_role('finance') && !has_role('hr')) {
     ob_end_clean();
     header('Location: /deno2/unauthorized.php');
     exit();
 }
 
-$current_user_id = $_SESSION['user_id'] ?? null;
+$current_user_id = $_SESSION['user_id'] ?? 0;
 
-// Handle payroll generation
+// ── Handle payroll generation ──────────────────────────────────
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['generate_payroll'])) {
     $conn->beginTransaction();
     try {
-        $month = (int)$_POST['payroll_month'];
-        $year = (int)$_POST['payroll_year'];
-        $fiscal_year_id = $_POST['fiscal_year_id'];
-        
-        // Check if payroll already exists
-        $check = $conn->prepare("
-            SELECT id FROM payroll_processing 
-            WHERE payroll_month = :month AND payroll_year = :year
-        ");
-        $check->execute([':month' => $month, ':year' => $year]);
-        
-        if ($check->fetch()) {
-            throw new Exception("Payroll for this month already exists!");
+        $month          = (int)$_POST['payroll_month'];
+        $year           = (int)$_POST['payroll_year'];
+        $fiscal_year_id = (int)$_POST['fiscal_year_id'];
+
+        if ($month < 1 || $month > 12 || $year < 2000) {
+            throw new Exception("Invalid month or year.");
         }
-        
-        // Get first and last day of month
-        $from_date = "$year-" . str_pad($month, 2, '0', STR_PAD_LEFT) . "-01";
-        $to_date = date('Y-m-t', strtotime($from_date));
-        
-        // Create payroll processing record
+
+        // Guard: no duplicate
+        $check = $conn->prepare("SELECT id FROM payroll_processing WHERE payroll_month=:m AND payroll_year=:y");
+        $check->execute([':m' => $month, ':y' => $year]);
+        if ($check->fetch()) {
+            throw new Exception("Payroll for this month/year already exists!");
+        }
+
+        $from_date    = "$year-" . str_pad($month, 2, '0', STR_PAD_LEFT) . "-01";
+        $to_date      = date('Y-m-t', strtotime($from_date));
         $payroll_code = "PAY-$year-" . str_pad($month, 2, '0', STR_PAD_LEFT);
-        
+
+        // Create header
         $stmt = $conn->prepare("
             INSERT INTO payroll_processing (
                 payroll_code, payroll_month, payroll_year, fiscal_year_id,
-                from_date, to_date, status, created_by
+                from_date, to_date, status, created_by, created_at
             ) VALUES (
-                :code, :month, :year, :fiscal_year_id,
-                :from_date, :to_date, 'DRAFT', :created_by
+                :code, :month, :year, :fy,
+                :from_date, :to_date, 'DRAFT', :created_by, NOW()
             ) RETURNING id
         ");
-        
         $stmt->execute([
-            ':code' => $payroll_code,
-            ':month' => $month,
-            ':year' => $year,
-            ':fiscal_year_id' => $fiscal_year_id,
-            ':from_date' => $from_date,
-            ':to_date' => $to_date,
-            ':created_by' => $current_user_id
+            ':code'       => $payroll_code,
+            ':month'      => $month,
+            ':year'       => $year,
+            ':fy'         => $fiscal_year_id,
+            ':from_date'  => $from_date,
+            ':to_date'    => $to_date,
+            ':created_by' => $current_user_id,
         ]);
-        
-        $payroll_id = $stmt->fetch()['id'];
-        
-        // Get all active employees
+        $payroll_id = (int)$stmt->fetchColumn();
+
+        // Get active employees with salary
         $employees = $conn->query("
-            SELECT 
-                e.id, e.emp_type, e.salary_mode,
-                es.basic_salary, es.daily_wage_rate, es.id as salary_id
+            SELECT e.id, e.emp_type,
+                   COALESCE(es.basic_salary, 0) AS basic_salary
             FROM employee e
-            LEFT JOIN employee_salary es ON e.id = es.employee_id AND es.is_current = true
+            LEFT JOIN employee_salary es ON es.employee_id = e.id AND es.is_current = true
             WHERE e.emp_status = 'ACTIVE' AND e.deleted_date IS NULL
         ")->fetchAll(PDO::FETCH_ASSOC);
-        
-        $total_gross = 0;
-        $total_deductions = 0;
-        $total_net = 0;
-        
+
+        $total_gross = 0; $total_ded = 0; $total_net = 0;
+        $working_days = 26; // standard working days per month
+
         foreach ($employees as $emp) {
-            // Get attendance summary
-            $att_summary = $conn->prepare("
-                SELECT 
-                    COUNT(*) FILTER (WHERE attendance_status = 'PRESENT') as present_days,
-                    COUNT(*) FILTER (WHERE attendance_status = 'ABSENT') as absent_days,
-                    COUNT(*) FILTER (WHERE attendance_status = 'LEAVE') as leave_days,
-                    COUNT(*) FILTER (WHERE attendance_status = 'HOLIDAY') as holiday_days,
-                    COALESCE(SUM(worked_minutes), 0) as total_minutes,
-                    COALESCE(SUM(overtime_minutes), 0) as overtime_minutes
-                FROM attendance
-                WHERE employee_id = :emp_id
-                AND attendance_date BETWEEN :from_date AND :to_date
+            $basic = (float)$emp['basic_salary'];
+
+            // Attendance summary — uses attendance_date_eng and ot_hours
+            $attStmt = $conn->prepare("
+                SELECT
+                    COUNT(*) FILTER (WHERE ast.status_code = 'P')  AS present_days,
+                    COUNT(*) FILTER (WHERE ast.status_code = 'A')  AS absent_days,
+                    COUNT(*) FILTER (WHERE ast.status_code = 'L')  AS leave_days,
+                    COUNT(*) FILTER (WHERE ast.status_code = 'H')  AS holiday_days,
+                    COALESCE(SUM(a.ot_hours), 0)                   AS ot_hours
+                FROM attendance a
+                LEFT JOIN attendance_status ast ON a.status_id = ast.id
+                WHERE a.employee_id = :emp_id
+                  AND a.attendance_date_eng BETWEEN :from_date AND :to_date
             ");
-            $att_summary->execute([
-                ':emp_id' => $emp['id'],
+            $attStmt->execute([
+                ':emp_id'    => $emp['id'],
                 ':from_date' => $from_date,
-                ':to_date' => $to_date
+                ':to_date'   => $to_date,
             ]);
-            $att = $att_summary->fetch(PDO::FETCH_ASSOC);
-            
-            // Calculate salary based on type
-            $basic_salary = $emp['basic_salary'] ?? 0;
-            $gross_salary = $basic_salary;
-            
-            // For daily wages, calculate based on attendance
-            if ($emp['emp_type'] === 'DAILY_WAGES' && $emp['daily_wage_rate']) {
-                $gross_salary = $emp['daily_wage_rate'] * $att['present_days'];
-            }
-            
-            // Get salary components
-            if ($emp['salary_id']) {
-                $components = $conn->prepare("
-                    SELECT 
-                        sc.component_type,
-                        sc.component_code,
-                        esc.calculated_amount
-                    FROM employee_salary_components esc
-                    JOIN salary_components sc ON esc.component_id = sc.id
-                    WHERE esc.employee_salary_id = :salary_id
-                    AND esc.is_active = true
-                ");
-                $components->execute([':salary_id' => $emp['salary_id']]);
-                
-                $earnings = 0;
-                $deductions = 0;
-                
-                while ($comp = $components->fetch(PDO::FETCH_ASSOC)) {
-                    if ($comp['component_type'] === 'EARNING') {
-                        $earnings += $comp['calculated_amount'];
-                    } elseif ($comp['component_type'] === 'DEDUCTION') {
-                        $deductions += $comp['calculated_amount'];
-                    }
-                }
-                
-                $gross_salary += $earnings;
-                $total_deductions_emp = $deductions;
-            } else {
-                $total_deductions_emp = 0;
-            }
-            
-            // Calculate overtime
-            $overtime_hours = $att['overtime_minutes'] / 60;
-            $overtime_amount = 0;
-            
-            if ($overtime_hours > 0 && $basic_salary > 0) {
-                $hourly_rate = $basic_salary / (30 * 8); // Assuming 30 days, 8 hours per day
-                $overtime_amount = $overtime_hours * $hourly_rate * 1.5; // 1.5x overtime rate
-            }
-            
-            $gross_salary += $overtime_amount;
-            $net_payable = $gross_salary - $total_deductions_emp;
-            
+            $att = $attStmt->fetch(PDO::FETCH_ASSOC);
+
+            $present  = (int)($att['present_days'] ?? 0);
+            $absent   = (int)($att['absent_days']  ?? 0);
+            $leaves   = (int)($att['leave_days']   ?? 0);
+            $holidays = (int)($att['holiday_days'] ?? 0);
+            $otHours  = (float)($att['ot_hours']   ?? 0);
+
+            // Proportional basic (deduct unpaid absences)
+            $paidDays    = max(0, $working_days - $absent);
+            $perDay      = $working_days > 0 ? $basic / $working_days : 0;
+            $effectBasic = round($perDay * $paidDays, 2);
+
+            // OT: 1.5× hourly rate
+            $hourlyRate  = $working_days > 0 ? ($basic / ($working_days * 8)) : 0;
+            $otAmount    = round($otHours * $hourlyRate * 1.5, 2);
+
+            $grossSalary    = $effectBasic + $otAmount;
+
+            // Simple deduction estimate (SSF 11% if applicable — no SSF flag yet)
+            $totalDedEmp = 0;
+            $netPayable  = round($grossSalary - $totalDedEmp, 2);
+
             // Insert payroll detail
-            $stmt = $conn->prepare("
+            $ins = $conn->prepare("
                 INSERT INTO payroll_details (
                     payroll_processing_id, employee_id,
                     total_working_days, total_present_days, total_absent_days,
                     total_leaves, total_holidays, total_paid_days,
                     overtime_hours, overtime_amount,
-                    basic_salary, gross_salary, total_earnings,
-                    total_deductions, net_payable,
-                    daily_wage_rate, created_by
+                    basic_salary, total_earnings, gross_salary,
+                    ssf_employee, ssf_employer, pf_employee, pf_employer,
+                    income_tax, other_deductions, total_deductions,
+                    net_payable, status, created_by, created_at
                 ) VALUES (
-                    :payroll_id, :emp_id,
-                    30, :present, :absent,
-                    :leaves, :holidays, :present,
-                    :ot_hours, :ot_amount,
-                    :basic, :gross, :gross,
-                    :deductions, :net,
-                    :daily_rate, :created_by
+                    :pp_id, :emp_id,
+                    :working, :present, :absent,
+                    :leaves, :holidays, :paid,
+                    :ot_h, :ot_amt,
+                    :basic, :earnings, :gross,
+                    0, 0, 0, 0,
+                    0, 0, :total_ded,
+                    :net, 'CALCULATED', :created_by, NOW()
                 )
             ");
-            
-            $stmt->execute([
-                ':payroll_id' => $payroll_id,
-                ':emp_id' => $emp['id'],
-                ':present' => $att['present_days'],
-                ':absent' => $att['absent_days'],
-                ':leaves' => $att['leave_days'],
-                ':holidays' => $att['holiday_days'],
-                ':ot_hours' => $overtime_hours,
-                ':ot_amount' => $overtime_amount,
-                ':basic' => $basic_salary,
-                ':gross' => $gross_salary,
-                ':deductions' => $total_deductions_emp,
-                ':net' => $net_payable,
-                ':daily_rate' => $emp['daily_wage_rate'],
-                ':created_by' => $current_user_id
+            $ins->execute([
+                ':pp_id'      => $payroll_id,
+                ':emp_id'     => $emp['id'],
+                ':working'    => $working_days,
+                ':present'    => $present,
+                ':absent'     => $absent,
+                ':leaves'     => $leaves,
+                ':holidays'   => $holidays,
+                ':paid'       => $paidDays,
+                ':ot_h'       => $otHours,
+                ':ot_amt'     => $otAmount,
+                ':basic'      => $effectBasic,
+                ':earnings'   => $grossSalary,
+                ':gross'      => $grossSalary,
+                ':total_ded'  => $totalDedEmp,
+                ':net'        => $netPayable,
+                ':created_by' => $current_user_id,
             ]);
-            
-            $total_gross += $gross_salary;
-            $total_deductions += $total_deductions_emp;
-            $total_net += $net_payable;
+
+            $total_gross += $grossSalary;
+            $total_ded   += $totalDedEmp;
+            $total_net   += $netPayable;
         }
-        
-        // Update payroll processing totals
-        $stmt = $conn->prepare("
+
+        // Update header totals — use correct column: processed_at (not processed_date)
+        $upd = $conn->prepare("
             UPDATE payroll_processing SET
-                total_employees = :count,
-                total_gross = :gross,
-                total_deductions = :deductions,
+                total_employees   = :cnt,
+                total_gross       = :gross,
+                total_deductions  = :ded,
                 total_net_payable = :net,
-                status = 'CALCULATED',
-                processed_by = :user_id,
-                processed_date = NOW()
+                status            = 'CALCULATED',
+                processed_by      = :user_id,
+                processed_at      = NOW()
             WHERE id = :id
         ");
-        
-        $stmt->execute([
-            ':count' => count($employees),
-            ':gross' => $total_gross,
-            ':deductions' => $total_deductions,
-            ':net' => $total_net,
+        $upd->execute([
+            ':cnt'     => count($employees),
+            ':gross'   => $total_gross,
+            ':ded'     => $total_ded,
+            ':net'     => $total_net,
             ':user_id' => $current_user_id,
-            ':id' => $payroll_id
+            ':id'      => $payroll_id,
         ]);
-        
+
         $conn->commit();
-        $_SESSION['success_message'] = "Payroll generated successfully for " . date('F Y', strtotime($from_date));
-        header("Location: view.php?id=$payroll_id");
+        $_SESSION['success_message'] = "Payroll generated: $payroll_code (" . count($employees) . " employees, Net: NPR " . number_format($total_net, 2) . ")";
+        header("Location: process.php");
         exit();
-        
+
     } catch (Exception $e) {
         $conn->rollBack();
-        $_SESSION['error_message'] = "Error: " . $e->getMessage();
+        $_SESSION['error_message'] = "Error generating payroll: " . $e->getMessage();
     }
 }
 
-// Get fiscal years
+// ── Fetch data for display ─────────────────────────────────────
 $fiscal_years = $conn->query("
-    SELECT id, fiscal_code, start_date, end_date, is_active 
-    FROM fiscal_years 
-    ORDER BY start_date DESC
+    SELECT id, fiscal_code, start_date, end_date, is_active
+    FROM fiscal_years ORDER BY start_date DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get recent payrolls
+// Recent payrolls — correct column: created_at (not created_date)
 $recent_payrolls = $conn->query("
-    SELECT 
-        id, payroll_code, payroll_month, payroll_year,
-        total_employees, total_net_payable, status,
-        created_date
+    SELECT id, payroll_code, payroll_month, payroll_year,
+           total_employees, total_gross, total_net_payable, status, created_at
     FROM payroll_processing
     ORDER BY payroll_year DESC, payroll_month DESC
-    LIMIT 10
+    LIMIT 12
 ")->fetchAll(PDO::FETCH_ASSOC);
-?>
 
+// Quick stats
+$empWithSalary  = $conn->query("SELECT COUNT(DISTINCT employee_id) FROM employee_salary WHERE is_current=true")->fetchColumn();
+$activeEmpCount = $conn->query("SELECT COUNT(*) FROM employee WHERE emp_status='ACTIVE' AND deleted_date IS NULL")->fetchColumn();
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Process Payroll</title>
+    <title>Process Payroll — JEMC</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
     <style>
-        .status-DRAFT { background-color: #ffc107; color: black; }
-        .status-PROCESSING { background-color: #17a2b8; color: white; }
-        .status-CALCULATED { background-color: #28a745; color: white; }
-        .status-APPROVED { background-color: #007bff; color: white; }
-        .status-PAID { background-color: #6c757d; color: white; }
-        .status-LOCKED { background-color: #dc3545; color: white; }
+        body { background: #f0f2f8; }
+        .status-DRAFT      { background:#ffc107;color:#000; }
+        .status-CALCULATED { background:#28a745;color:#fff; }
+        .status-APPROVED   { background:#007bff;color:#fff; }
+        .status-PAID       { background:#6c757d;color:#fff; }
+        .status-LOCKED     { background:#dc3545;color:#fff; }
     </style>
 </head>
 <body>
-    <div class="container-fluid mt-4">
-        <div class="row mb-4">
-            <div class="col-12">
-                <h2><i class="fas fa-money-check-alt"></i> Process Payroll</h2>
-                <nav aria-label="breadcrumb">
-                    <ol class="breadcrumb">
-                        <li class="breadcrumb-item"><a href="../../index.php">Dashboard</a></li>
-                        <li class="breadcrumb-item"><a href="index.php">Payroll</a></li>
-                        <li class="breadcrumb-item active">Process</li>
-                    </ol>
-                </nav>
+<div class="container-fluid mt-4" style="max-width:1200px">
+
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="mb-0"><i class="fas fa-money-check-alt me-2"></i>Process Payroll</h3>
+            <nav aria-label="breadcrumb">
+                <ol class="breadcrumb mb-0" style="font-size:.8rem">
+                    <li class="breadcrumb-item"><a href="/deno2/index.php">Dashboard</a></li>
+                    <li class="breadcrumb-item active">Payroll</li>
+                </ol>
+            </nav>
+        </div>
+    </div>
+
+    <?php if (isset($_SESSION['success_message'])): ?>
+        <div class="alert alert-success alert-dismissible fade show">
+            <i class="fas fa-check-circle me-2"></i><?= htmlspecialchars($_SESSION['success_message']) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php unset($_SESSION['success_message']); ?>
+    <?php endif; ?>
+    <?php if (isset($_SESSION['error_message'])): ?>
+        <div class="alert alert-danger alert-dismissible fade show">
+            <i class="fas fa-exclamation-triangle me-2"></i><?= htmlspecialchars($_SESSION['error_message']) ?>
+            <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+        </div>
+        <?php unset($_SESSION['error_message']); ?>
+    <?php endif; ?>
+
+    <!-- Quick stats -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fs-2 fw-bold text-primary"><?= $activeEmpCount ?></div>
+                <div class="text-muted small">Active Employees</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fs-2 fw-bold text-success"><?= $empWithSalary ?></div>
+                <div class="text-muted small">With Salary Record</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fs-2 fw-bold text-warning"><?= count($recent_payrolls) ?></div>
+                <div class="text-muted small">Payroll Runs</div>
+            </div>
+        </div>
+        <div class="col-md-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fs-2 fw-bold text-info">
+                    <?= $recent_payrolls ? 'NPR ' . number_format($recent_payrolls[0]['total_net_payable'] / 1000, 0) . 'K' : '—' ?>
+                </div>
+                <div class="text-muted small">Last Net Payable</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Generate Form -->
+        <div class="col-md-5">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-primary text-white">
+                    <h5 class="mb-0"><i class="fas fa-plus-circle me-2"></i>Generate New Payroll</h5>
+                </div>
+                <div class="card-body">
+                    <form method="POST" id="payrollForm">
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">BS Month (Nepali)</label>
+                            <select name="payroll_month" class="form-select" required>
+                                <option value="">Select Month</option>
+                                <?php
+                                $bsMonths = ['1'=>'Baisakh','2'=>'Jestha','3'=>'Ashadh','4'=>'Shrawan',
+                                             '5'=>'Bhadra','6'=>'Ashwin','7'=>'Kartik','8'=>'Mangsir',
+                                             '9'=>'Poush','10'=>'Magh','11'=>'Falgun','12'=>'Chaitra'];
+                                foreach ($bsMonths as $num => $name):
+                                ?>
+                                <option value="<?= $num ?>"><?= $num ?> — <?= $name ?></option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">BS Year</label>
+                            <select name="payroll_year" class="form-select" required>
+                                <option value="">Select Year</option>
+                                <?php for ($y = 2082; $y >= 2078; $y--): ?>
+                                <option value="<?= $y ?>" <?= $y == 2082 ? 'selected' : '' ?>><?= $y ?></option>
+                                <?php endfor; ?>
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Fiscal Year</label>
+                            <select name="fiscal_year_id" class="form-select" required>
+                                <option value="">Select Fiscal Year</option>
+                                <?php foreach ($fiscal_years as $fy): ?>
+                                <option value="<?= $fy['id'] ?>" <?= $fy['is_active'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars($fy['fiscal_code']) ?><?= $fy['is_active'] ? ' (Active)' : '' ?>
+                                </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </div>
+                        <div class="alert alert-info py-2 small">
+                            <i class="fas fa-info-circle me-1"></i>
+                            Processes <strong><?= $activeEmpCount ?> active employees</strong> — calculates basic salary, OT, and deductions based on attendance.
+                        </div>
+                        <button type="submit" name="generate_payroll" class="btn btn-primary w-100">
+                            <i class="fas fa-cogs me-2"></i>Generate Payroll
+                        </button>
+                    </form>
+                </div>
             </div>
         </div>
 
-        <?php if (isset($_SESSION['success_message'])): ?>
-            <div class="alert alert-success alert-dismissible fade show">
-                <i class="fas fa-check-circle"></i> <?= htmlspecialchars($_SESSION['success_message']) ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-            <?php unset($_SESSION['success_message']); ?>
-        <?php endif; ?>
-
-        <?php if (isset($_SESSION['error_message'])): ?>
-            <div class="alert alert-danger alert-dismissible fade show">
-                <i class="fas fa-exclamation-triangle"></i> <?= htmlspecialchars($_SESSION['error_message']) ?>
-                <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-            </div>
-            <?php unset($_SESSION['error_message']); ?>
-        <?php endif; ?>
-
-        <div class="row">
-            <!-- Generate New Payroll -->
-            <div class="col-md-5 mb-4">
-                <div class="card shadow">
-                    <div class="card-header bg-primary text-white">
-                        <h5 class="mb-0"><i class="fas fa-plus-circle"></i> Generate New Payroll</h5>
-                    </div>
-                    <div class="card-body">
-                        <form method="POST" id="payrollForm">
-                            <div class="mb-3">
-                                <label class="form-label">Select Month & Year <span class="text-danger">*</span></label>
-                                <div class="row">
-                                    <div class="col-md-6">
-                                        <select name="payroll_month" class="form-select" required>
-                                            <option value="">Select Month</option>
-                                            <option value="1">January</option>
-                                            <option value="2">February</option>
-                                            <option value="3">March</option>
-                                            <option value="4">April</option>
-                                            <option value="5">May</option>
-                                            <option value="6">June</option>
-                                            <option value="7">July</option>
-                                            <option value="8">August</option>
-                                            <option value="9">September</option>
-                                            <option value="10">October</option>
-                                            <option value="11">November</option>
-                                            <option value="12">December</option>
-                                        </select>
-                                    </div>
-                                    <div class="col-md-6">
-                                        <select name="payroll_year" class="form-select" required>
-                                            <option value="">Select Year</option>
-                                            <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
-                                                <option value="<?= $y ?>" <?= $y == date('Y') ? 'selected' : '' ?>><?= $y ?></option>
-                                            <?php endfor; ?>
-                                        </select>
-                                    </div>
-                                </div>
-                            </div>
-
-                            <div class="mb-3">
-                                <label class="form-label">Fiscal Year <span class="text-danger">*</span></label>
-                                <select name="fiscal_year_id" class="form-select" required>
-                                    <option value="">Select Fiscal Year</option>
-                                    <?php foreach ($fiscal_years as $fy): ?>
-                                        <option value="<?= $fy['id'] ?>" <?= $fy['is_active'] ? 'selected' : '' ?>>
-                                            <?= htmlspecialchars($fy['fiscal_code']) ?>
-                                            <?= $fy['is_active'] ? ' (Active)' : '' ?>
-                                        </option>
-                                    <?php endforeach; ?>
-                                </select>
-                            </div>
-
-                            <div class="alert alert-info">
-                                <i class="fas fa-info-circle"></i> 
-                                <strong>Note:</strong> This will process payroll for all active employees based on their:
-                                <ul class="mb-0 mt-2">
-                                    <li>Current salary structure</li>
-                                    <li>Attendance for the selected month</li>
-                                    <li>Applicable deductions and allowances</li>
-                                    <li>Overtime hours worked</li>
-                                </ul>
-                            </div>
-
-                            <button type="submit" name="generate_payroll" class="btn btn-primary w-100">
-                                <i class="fas fa-cogs"></i> Generate Payroll
-                            </button>
-                        </form>
-                    </div>
+        <!-- Recent Payrolls -->
+        <div class="col-md-7">
+            <div class="card shadow-sm border-0">
+                <div class="card-header bg-light">
+                    <h5 class="mb-0"><i class="fas fa-history me-2"></i>Recent Payroll Runs</h5>
                 </div>
-            </div>
-
-            <!-- Recent Payrolls -->
-            <div class="col-md-7 mb-4">
-                <div class="card shadow">
-                    <div class="card-header bg-light">
-                        <h5 class="mb-0"><i class="fas fa-history"></i> Recent Payrolls</h5>
-                    </div>
-                    <div class="card-body p-0">
-                        <div class="table-responsive">
-                            <table class="table table-hover mb-0">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Code</th>
-                                        <th>Period</th>
-                                        <th>Employees</th>
-                                        <th>Net Payable</th>
-                                        <th>Status</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if (empty($recent_payrolls)): ?>
-                                        <tr>
-                                            <td colspan="6" class="text-center py-4">
-                                                <i class="fas fa-info-circle"></i> No payroll records found
-                                            </td>
-                                        </tr>
-                                    <?php else: ?>
-                                        <?php foreach ($recent_payrolls as $payroll): ?>
-                                            <tr>
-                                                <td><strong><?= htmlspecialchars($payroll['payroll_code']) ?></strong></td>
-                                                <td>
-                                                    <?= date('F Y', strtotime($payroll['payroll_year'] . '-' . str_pad($payroll['payroll_month'], 2, '0', STR_PAD_LEFT) . '-01')) ?>
-                                                </td>
-                                                <td><?= number_format($payroll['total_employees']) ?></td>
-                                                <td>₹<?= number_format($payroll['total_net_payable'], 2) ?></td>
-                                                <td>
-                                                    <span class="badge status-<?= $payroll['status'] ?>">
-                                                        <?= $payroll['status'] ?>
-                                                    </span>
-                                                </td>
-                                                <td>
-                                                    <a href="view.php?id=<?= $payroll['id'] ?>" class="btn btn-sm btn-outline-primary">
-                                                        <i class="fas fa-eye"></i> View
-                                                    </a>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    <?php endif; ?>
-                                </tbody>
-                            </table>
-                        </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0" style="font-size:.85rem">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Code</th>
+                                    <th>Period (BS)</th>
+                                    <th class="text-center">Emp</th>
+                                    <th class="text-end">Gross</th>
+                                    <th class="text-end">Net Payable</th>
+                                    <th>Status</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                            <?php if (empty($recent_payrolls)): ?>
+                                <tr>
+                                    <td colspan="7" class="text-center py-5 text-muted">
+                                        <i class="fas fa-inbox fa-2x mb-2 d-block"></i>
+                                        No payroll runs yet.<br>
+                                        <small>Generate your first payroll using the form.</small>
+                                    </td>
+                                </tr>
+                            <?php else: ?>
+                                <?php
+                                $bsM = ['1'=>'Baisakh','2'=>'Jestha','3'=>'Ashadh','4'=>'Shrawan',
+                                        '5'=>'Bhadra','6'=>'Ashwin','7'=>'Kartik','8'=>'Mangsir',
+                                        '9'=>'Poush','10'=>'Magh','11'=>'Falgun','12'=>'Chaitra'];
+                                foreach ($recent_payrolls as $p):
+                                ?>
+                                <tr>
+                                    <td><strong><?= htmlspecialchars($p['payroll_code']) ?></strong></td>
+                                    <td><?= $bsM[$p['payroll_month']] ?? $p['payroll_month'] ?> <?= $p['payroll_year'] ?></td>
+                                    <td class="text-center"><?= number_format($p['total_employees']) ?></td>
+                                    <td class="text-end">NPR <?= number_format($p['total_gross'], 0) ?></td>
+                                    <td class="text-end fw-semibold text-success">NPR <?= number_format($p['total_net_payable'], 0) ?></td>
+                                    <td>
+                                        <span class="badge status-<?= $p['status'] ?>"><?= $p['status'] ?></span>
+                                    </td>
+                                    <td>
+                                        <a href="view.php?id=<?= $p['id'] ?>" class="btn btn-xs btn-outline-primary" style="font-size:.72rem;padding:2px 8px">
+                                            <i class="fas fa-eye"></i>
+                                        </a>
+                                    </td>
+                                </tr>
+                                <?php endforeach; ?>
+                            <?php endif; ?>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
             </div>
         </div>
     </div>
+</div>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script>
-        // Form validation
-        document.getElementById('payrollForm').addEventListener('submit', function(e) {
-            const month = this.payroll_month.value;
-            const year = this.payroll_year.value;
-            const fiscalYear = this.fiscal_year_id.value;
-            
-            if (!month || !year || !fiscalYear) {
-                e.preventDefault();
-                alert('Please fill in all required fields');
-                return false;
-            }
-            
-            // Confirm before processing
-            const monthName = this.payroll_month.options[this.payroll_month.selectedIndex].text;
-            if (!confirm(`Are you sure you want to generate payroll for ${monthName} ${year}?`)) {
-                e.preventDefault();
-                return false;
-            }
-            
-            // Disable submit button to prevent double submission
-            const submitBtn = this.querySelector('button[type="submit"]');
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Processing...';
-        });
-    </script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+document.getElementById('payrollForm').addEventListener('submit', function(e) {
+    const month = this.payroll_month.value;
+    const year  = this.payroll_year.value;
+    const fy    = this.fiscal_year_id.value;
+    if (!month || !year || !fy) {
+        e.preventDefault();
+        alert('Please fill in all required fields');
+        return;
+    }
+    const mName = this.payroll_month.options[this.payroll_month.selectedIndex].text;
+    if (!confirm('Generate payroll for ' + mName + ' ' + year + '?\n\nThis will process all active employees.')) {
+        e.preventDefault();
+        return;
+    }
+    const btn = this.querySelector('button[type="submit"]');
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
+});
+</script>
 </body>
 </html>
+<?php ob_end_flush(); ?>
