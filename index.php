@@ -106,9 +106,27 @@ $zk = $conn->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // ── VEHICLES ──────────────────────────────────────────────────
-$veh = $conn->query("SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='ACTIVE') AS active FROM vehicles")->fetch(PDO::FETCH_ASSOC);
-$kmMonth  = $conn->query("SELECT COALESCE(SUM(total_km),0) FROM vehicle_daily_logs WHERE EXTRACT(MONTH FROM log_date_eng)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM log_date_eng)=EXTRACT(YEAR FROM CURRENT_DATE)")->fetchColumn();
-$fuelMonth= $conn->query("SELECT COALESCE(SUM(quantity),0) FROM fuel_coupons WHERE EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM CURRENT_DATE)")->fetchColumn();
+// vehicles.status is BOOLEAN (true=active, false=inactive)
+$veh = $conn->query("
+    SELECT COUNT(*) AS total,
+           COUNT(*) FILTER (WHERE status = true AND deleted_at IS NULL) AS active
+    FROM vehicles
+")->fetch(PDO::FETCH_ASSOC);
+
+$kmMonth = $conn->query("
+    SELECT COALESCE(SUM(total_km), 0)
+    FROM vehicle_daily_logs
+    WHERE EXTRACT(MONTH FROM log_date_eng) = EXTRACT(MONTH FROM CURRENT_DATE)
+      AND EXTRACT(YEAR  FROM log_date_eng) = EXTRACT(YEAR  FROM CURRENT_DATE)
+")->fetchColumn();
+
+// fuel_coupons uses allocated_qty and issued_date_eng
+$fuelMonth = $conn->query("
+    SELECT COALESCE(SUM(allocated_qty), 0)
+    FROM fuel_coupons
+    WHERE EXTRACT(MONTH FROM issued_date_eng) = EXTRACT(MONTH FROM CURRENT_DATE)
+      AND EXTRACT(YEAR  FROM issued_date_eng) = EXTRACT(YEAR  FROM CURRENT_DATE)
+")->fetchColumn();
 
 // ── PAYROLL ───────────────────────────────────────────────────
 $payroll = $conn->query("

@@ -84,22 +84,13 @@ $lastPayroll = $db->query("
 ")->fetch(PDO::FETCH_ASSOC);
 
 // ── Vehicle ───────────────────────────────────────────────────
-$vehicleStats = $db->query("
-    SELECT
-        COUNT(*)                                                         AS total,
-        COUNT(*) FILTER (WHERE status = 'ACTIVE')                        AS active,
-        COALESCE(SUM(CASE WHEN EXTRACT(MONTH FROM log_date_eng)=EXTRACT(MONTH FROM CURRENT_DATE)
-                           AND EXTRACT(YEAR  FROM log_date_eng)=EXTRACT(YEAR  FROM CURRENT_DATE)
-                     THEN total_km END), 0)                              AS km_this_month
-    FROM vehicles v
-    LEFT JOIN vehicle_daily_logs vdl ON vdl.vehicle_id = v.id
-    GROUP BY 1,2 LIMIT 1
-")->fetch(PDO::FETCH_ASSOC);
+// vehicleStats unused — replaced by vehicleCount + kmMonth below
+$vehicleStats = [];
 
 // Simpler vehicle count
-$vehicleCount = $db->query("SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status='ACTIVE') AS active FROM vehicles")->fetch(PDO::FETCH_ASSOC);
-$kmMonth = $db->query("SELECT COALESCE(SUM(total_km),0) AS km FROM vehicle_daily_logs WHERE EXTRACT(MONTH FROM log_date_eng)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM log_date_eng)=EXTRACT(YEAR FROM CURRENT_DATE)")->fetchColumn();
-$fuelMonth = $db->query("SELECT COALESCE(SUM(quantity),0) AS litres FROM fuel_coupons WHERE EXTRACT(MONTH FROM created_at)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM created_at)=EXTRACT(YEAR FROM CURRENT_DATE)")->fetchColumn();
+$vehicleCount = $db->query("SELECT COUNT(*) AS total, COUNT(*) FILTER (WHERE status=true AND deleted_at IS NULL) AS active FROM vehicles")->fetch(PDO::FETCH_ASSOC);
+$kmMonth = $db->query("SELECT COALESCE(SUM(total_km),0) FROM vehicle_daily_logs WHERE EXTRACT(MONTH FROM log_date_eng)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM log_date_eng)=EXTRACT(YEAR FROM CURRENT_DATE)")->fetchColumn();
+$fuelMonth = $db->query("SELECT COALESCE(SUM(allocated_qty),0) FROM fuel_coupons WHERE EXTRACT(MONTH FROM issued_date_eng)=EXTRACT(MONTH FROM CURRENT_DATE) AND EXTRACT(YEAR FROM issued_date_eng)=EXTRACT(YEAR FROM CURRENT_DATE)")->fetchColumn();
 
 // ── Production (Deno) ─────────────────────────────────────────
 $denoStats = $db->query("
