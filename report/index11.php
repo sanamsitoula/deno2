@@ -1,0 +1,1498 @@
+<?php
+// Inline AJAX handler for truncate count
+if (isset($_GET['ajax']) && $_GET['ajax'] === 'trunc_count') {
+    require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+    $slug = preg_replace('/[^a-z0-9_]/', '', $_GET['slug'] ?? '');
+    $fy   = trim($_GET['fy'] ?? '');
+    $tbl  = 'recon_' . $slug;
+    try {
+        $c = $conn->prepare("SELECT COUNT(*) FROM $tbl WHERE fiscal_code=:fy");
+        $c->execute([':fy' => $fy]);
+        echo json_encode(['count' => (int)$c->fetchColumn()]);
+    } catch (Exception $e) {
+        echo json_encode(['count' => 0]);
+    }
+    exit;
+}
+
+/**
+ * Stock Reconciliation Module v3
+ * - Book list: ALL books from books table, deno qty joined
+ * - Fiscal years from fiscal_years table via deno.deno_year
+ * - Deno tab: one row per book, separate columns per FY
+ * - Each module tab: FY selector, books from books table
+ * - Book dropdown: code + name + class + latest FY
+ * - Truncate per module per FY (confirm + live count preview)
+ * - Price fallback: own → marketing → other modules
+ * - Closing balance formula builder
+ * - Dynamic module registry (recon_modules table)
+ */
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
+
+if (session_status() === PHP_SESSION_NONE) session_start();
+
+$current_user    = $_SESSION['username'] ?? 'system';
+$current_user_id = $_SESSION['user_id']  ?? null;
+
+/* ─── Module registry ─── */
+$conn->exec("CREATE TABLE IF NOT EXISTS recon_modules (
+    id SERIAL PRIMARY KEY, slug VARCHAR(50) NOT NULL UNIQUE,
+    label VARCHAR(100) NOT NULL, tbl VARCHAR(100) NOT NULL UNIQUE,
+    color VARCHAR(20) DEFAULT '#3b82f6', icon VARCHAR(10) DEFAULT '📦',
+    sort_order INTEGER DEFAULT 99, is_active BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)");
+
+$built_in = [
+    ['marketing',  'Marketing',   'recon_marketing',   '#16a34a','🟢',1],
+    ['stockkeeper','Stock Keeper','recon_stockkeeper',  '#7c3aed','🟣',2],
+    ['software',   'Software',    'recon_software',     '#d97706','🟠',3],
+    ['comparative','Comparative', 'recon_comparative',  '#db2777','🔴',4],
+];
+foreach ($built_in as [$s,$l,$t,$c,$i,$o]) {
+    $conn->prepare("INSERT INTO recon_modules(slug,label,tbl,color,icon,sort_order)
+        VALUES(:s,:l,:t,:c,:i,:o) ON CONFLICT(slug) DO NOTHING")
+        ->execute([':s'=>$s,':l'=>$l,':t'=>$t,':c'=>$c,':i'=>$i,':o'=>$o]);
+}
+$modules = $conn->query("SELECT * FROM recon_modules WHERE is_active=TRUE ORDER BY sort_order,id")
+    ->fetchAll(PDO::FETCH_ASSOC);
+
+/* DDL for recon tables — now includes fiscal_code + unique(book_code,fiscal_code) */
+$recon_ddl = "id SERIAL PRIMARY KEY,
+    book_code   VARCHAR(50)    NOT NULL,
+    fiscal_code VARCHAR(10)    NOT NULL,
+    price       NUMERIC(12,2)  DEFAULT 0,
+    qty         INTEGER        DEFAULT 0,
+    notes       TEXT,
+    created_by  INTEGER,
+    created_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at  TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(book_code, fiscal_code)";
+foreach ($modules as $m) {
+    $conn->exec("CREATE TABLE IF NOT EXISTS {$m['tbl']} ($recon_ddl)");
+}
+
+/* ─── Fiscal years (from fiscal_years table) ─── */
+$all_fiscal_years = $conn->query("
+    SELECT fiscal_name, fiscal_code FROM fiscal_years ORDER BY fiscal_name DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$active_fiscal_years = $conn->query("
+    SELECT fiscal_name, fiscal_code FROM fiscal_years WHERE is_active=TRUE ORDER BY fiscal_name DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+/* ─── Fiscal years that actually have deno data ─── */
+$deno_fiscal_years = $conn->query("
+    SELECT DISTINCT d.deno_year AS fiscal_code,
+           COALESCE(f.fiscal_name, d.deno_year) AS fiscal_name
+    FROM deno d
+    LEFT JOIN fiscal_years f ON f.fiscal_code = d.deno_year
+    WHERE d.deleted_at IS NULL AND d.deno_year IS NOT NULL
+    ORDER BY fiscal_code DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+/* ─── Filters ─── */
+$sel_fy      = $_GET['fiscal_year'] ?? ($deno_fiscal_years[0]['fiscal_code'] ?? ($active_fiscal_years[0]['fiscal_code'] ?? ''));
+$sel_book    = $_GET['book_code']   ?? '';
+$sel_trans   = $_GET['translated']  ?? '';
+$sel_class   = $_GET['class_level'] ?? '';
+$search_term = $_GET['search']      ?? '';
+$sort_col    = in_array($_GET['sort']??'',['book_name','book_code','class_level','deno_qty']) ? $_GET['sort'] : 'book_name';
+$sort_dir    = strtoupper($_GET['dir']??'ASC')==='DESC' ? 'DESC' : 'ASC';
+
+/* ─── Closing balance formula (per FY in session) ─── */
+$fkey = 'cbf_'.$sel_fy;
+if (isset($_GET['save_formula'])) {
+    $_SESSION[$fkey] = trim($_GET['cb_formula']??'');
+    $r2 = array_filter($_GET, fn($k)=>!in_array($k,['save_formula','cb_formula']), ARRAY_FILTER_USE_KEY);
+    header('Location: '.$_SERVER['PHP_SELF'].'?'.http_build_query($r2)); exit;
+}
+$cb_formula = $_SESSION[$fkey] ?? '';
+
+/* ─── All books for dropdown (from books table, latest deno FY shown) ─── */
+$all_deno_books = $conn->query("
+    SELECT b.book_code, b.book_name,
+           COALESCE(b.class_level::text,'') AS class_level,
+           COALESCE(b.is_translated,FALSE)  AS is_translated,
+           agg.latest_fy,
+           COALESCE(f.fiscal_name, agg.latest_fy) AS fiscal_name
+    FROM books b
+    LEFT JOIN (
+        SELECT book_code, MAX(deno_year) AS latest_fy
+        FROM deno WHERE deleted_at IS NULL AND deno_year IS NOT NULL
+        GROUP BY book_code
+    ) agg ON agg.book_code = b.book_code
+    LEFT JOIN fiscal_years f ON f.fiscal_code = agg.latest_fy
+    ORDER BY b.book_name
+")->fetchAll(PDO::FETCH_ASSOC);
+
+/* ─── Class levels present in deno ─── */
+$class_levels = $conn->query("
+    SELECT DISTINCT b.class_level FROM books b
+    WHERE b.class_level IS NOT NULL
+    ORDER BY b.class_level
+")->fetchAll(PDO::FETCH_COLUMN);
+
+/* ═══════════════════════════════════════════════════════════
+   POST HANDLERS
+   ═══════════════════════════════════════════════════════════ */
+if ($_SERVER['REQUEST_METHOD'] === 'POST') {
+    $action = $_POST['action'] ?? '';
+
+    /* Add module */
+    if ($action === 'add_module') {
+        $ns=preg_replace('/[^a-z0-9_]/','',strtolower(trim($_POST['new_slug']??'')));
+        $nl=trim($_POST['new_label']??'');
+        $nc=trim($_POST['new_color']??'#3b82f6');
+        $ni=trim($_POST['new_icon']??'📦');
+        if ($ns && $nl) {
+            try {
+                $nt='recon_'.$ns;
+                $conn->prepare("INSERT INTO recon_modules(slug,label,tbl,color,icon,sort_order) VALUES(:s,:l,:t,:c,:i,99)")
+                    ->execute([':s'=>$ns,':l'=>$nl,':t'=>$nt,':c'=>$nc,':i'=>$ni]);
+                $conn->exec("CREATE TABLE IF NOT EXISTS $nt ($recon_ddl)");
+                $_SESSION['flash']=['type'=>'success','msg'=>"Module '$nl' created!"];
+            } catch(Exception $e) {
+                $_SESSION['flash']=['type'=>'danger','msg'=>'Slug already exists or invalid.'];
+            }
+        }
+        header('Location: '.$_SERVER['PHP_SELF'].'?fiscal_year='.urlencode($sel_fy)); exit;
+    }
+
+    /* Hide module */
+    if ($action === 'delete_module') {
+        $ds=trim($_POST['del_slug']??'');
+        $bis=array_column($built_in,0);
+        if ($ds && !in_array($ds,$bis)) {
+            $conn->prepare("UPDATE recon_modules SET is_active=FALSE WHERE slug=:s")->execute([':s'=>$ds]);
+            $_SESSION['flash']=['type'=>'success','msg'=>'Module hidden.'];
+        } else {
+            $_SESSION['flash']=['type'=>'danger','msg'=>'Cannot remove built-in modules.'];
+        }
+        header('Location: '.$_SERVER['PHP_SELF'].'?fiscal_year='.urlencode($sel_fy)); exit;
+    }
+
+    /* Truncate module for a specific FY */
+    if ($action === 'truncate_module') {
+        $ts   = trim($_POST['trunc_slug']??'');
+        $tfyc = trim($_POST['trunc_fy']??'');
+        $bis  = array_column($built_in,0); // deno is not in recon tables
+        $s2t  = array_column($modules,'tbl','slug');
+        if ($ts && $tfyc && isset($s2t[$ts])) {
+            $ttbl = $s2t[$ts];
+            $del  = $conn->prepare("DELETE FROM $ttbl WHERE fiscal_code=:fyc");
+            $del->execute([':fyc'=>$tfyc]);
+            $cnt  = $del->rowCount();
+            $_SESSION['flash']=['type'=>'success','msg'=>"Truncated $cnt rows from $ts for FY $tfyc."];
+        } else {
+            $_SESSION['flash']=['type'=>'danger','msg'=>'Truncate failed: invalid module or FY.'];
+        }
+        header('Location: '.$_SERVER['PHP_SELF'].'?fiscal_year='.urlencode($sel_fy)); exit;
+    }
+
+    $s2t = array_column($modules,'tbl','slug');
+
+    /* Save module rows */
+    if (str_starts_with($action,'save_') && isset($s2t[substr($action,5)])) {
+        $table = $s2t[substr($action,5)];
+        foreach (($_POST['rows']??[]) as $row) {
+            $bc=trim($row['book_code']??''); $fyc=trim($row['fiscal_code']??'');
+            if (!$bc||!$fyc) continue;
+            $conn->prepare("INSERT INTO $table(book_code,fiscal_code,price,qty,notes,created_by)
+                VALUES(:bc,:fyc,:pr,:qty,:notes,:uid)
+                ON CONFLICT(book_code,fiscal_code) DO UPDATE SET
+                    price=EXCLUDED.price, qty=EXCLUDED.qty,
+                    notes=EXCLUDED.notes, updated_at=CURRENT_TIMESTAMP")
+                ->execute([':bc'=>$bc,':fyc'=>$fyc,
+                    ':pr'=>floatval($row['price']??0),':qty'=>intval($row['qty']??0),
+                    ':notes'=>trim($row['notes']??''),':uid'=>$current_user_id]);
+        }
+        $_SESSION['flash']=['type'=>'success','msg'=>'Saved successfully!'];
+        header('Location: '.$_SERVER['PHP_SELF']
+            .'?fiscal_year='.urlencode($_POST['page_fy']??$sel_fy)
+            .'&book_code='.urlencode($_POST['book_filter']??'')
+            .'&translated='.urlencode($_POST['trans_filter']??'')
+            .'&class_level='.urlencode($_POST['class_filter']??'')
+            .'&search='.urlencode($_POST['search_filter']??'')); exit;
+    }
+
+    /* CSV Upload */
+    if ($action === 'upload_csv') {
+        $slug  = $_POST['upload_module']??'';
+        $table = $s2t[$slug]??'';
+        $fyc   = $_POST['upload_fiscal_code']??'';
+        $saved = 0;
+        if ($table && $fyc && isset($_FILES['csv_file']) && $_FILES['csv_file']['error']===0) {
+            $fh = fopen($_FILES['csv_file']['tmp_name'],'r');
+            if ($fh) {
+                fgetcsv($fh); // header: book_code,book_name,fiscal_year,price,qty,notes
+                while (($row=fgetcsv($fh))!==false) {
+                    if (count($row)<2) continue;
+                    $bc=trim($row[0]); if (!$bc||strtolower($bc)==='book_code') continue;
+                    $pr=floatval($row[3]??0); $qty=intval($row[4]??0); $notes=trim($row[5]??'');
+                    $conn->prepare("INSERT INTO $table(book_code,fiscal_code,price,qty,notes,created_by)
+                        VALUES(:bc,:fyc,:pr,:qty,:notes,:uid)
+                        ON CONFLICT(book_code,fiscal_code) DO UPDATE SET
+                            price=EXCLUDED.price,qty=EXCLUDED.qty,
+                            notes=EXCLUDED.notes,updated_at=CURRENT_TIMESTAMP")
+                        ->execute([':bc'=>$bc,':fyc'=>$fyc,':pr'=>$pr,':qty'=>$qty,':notes'=>$notes,':uid'=>$current_user_id]);
+                    $saved++;
+                }
+                fclose($fh);
+            }
+            $_SESSION['flash']=['type'=>'success','msg'=>"Uploaded $saved rows to $slug."];
+        } else {
+            $_SESSION['flash']=['type'=>'danger','msg'=>'Upload failed.'];
+        }
+        header('Location: '.$_SERVER['PHP_SELF'].'?fiscal_year='.urlencode($fyc)); exit;
+    }
+}
+
+/* ═══════════════════════════════════════════════════════════
+   FETCH MAIN RECONCILIATION DATA
+   Books from deno (fiscal_year = sel_fy), joined with each module
+   ═══════════════════════════════════════════════════════════ */
+$sel_parts = [
+    "d_agg.book_code",
+    "d_agg.book_name",
+    "d_agg.class_level",
+    "d_agg.is_translated",
+    "d_agg.book_type",
+    "d_agg.fiscal_code AS fy_code",
+    "d_agg.deno_qty"
+];
+$join_parts = [];
+$group_extra = [];
+
+foreach ($modules as $m) {
+    $a = $m['slug']; $tbl = $m['tbl'];
+    $sel_parts[]  = "r_{$a}.price AS {$a}_price, r_{$a}.qty AS {$a}_qty, r_{$a}.notes AS {$a}_notes, r_{$a}.updated_at AS {$a}_updated";
+    $join_parts[] = "LEFT JOIN $tbl r_{$a} ON r_{$a}.book_code=d_agg.book_code AND r_{$a}.fiscal_code=d_agg.fiscal_code";
+    $group_extra[] = "r_{$a}.price,r_{$a}.qty,r_{$a}.notes,r_{$a}.updated_at";
+}
+
+/* Where clauses on the outer query */
+$outer_where = ["1=1"];
+$outer_params = [];
+if ($sel_book)     { $outer_where[] = "d_agg.book_code=:bc";    $outer_params[':bc']=$sel_book; }
+if ($sel_trans!==''){$outer_where[] = "d_agg.is_translated=:tr"; $outer_params[':tr']=($sel_trans==='1')?'true':'false';}
+if ($sel_class)    { $outer_where[] = "d_agg.class_level=:cl";  $outer_params[':cl']=$sel_class;}
+if ($search_term)  { $outer_where[] = "(LOWER(d_agg.book_name) LIKE :s OR LOWER(d_agg.book_code) LIKE :s)"; $outer_params[':s']='%'.strtolower($search_term).'%';}
+
+$outer_where_sql = implode(' AND ', $outer_where);
+$sel_sql  = implode(",\n        ", $sel_parts);
+$join_sql  = implode("\n    ", $join_parts);
+$grp_sql   = "d_agg.book_code,d_agg.book_name,d_agg.class_level,d_agg.is_translated,d_agg.book_type,d_agg.fiscal_code,d_agg.deno_qty,"
+           . implode(',',$group_extra);
+
+/* Sort */
+$sort_map = ['book_name'=>'d_agg.book_name','book_code'=>'d_agg.book_code','class_level'=>'d_agg.class_level','deno_qty'=>'d_agg.deno_qty'];
+$sort_expr = $sort_map[$sort_col] ?? 'd_agg.book_name';
+
+$main_params = array_merge([':fy'=>$sel_fy, ':fy2'=>$sel_fy, ':fy3'=>$sel_fy], $outer_params);
+
+$stmt = $conn->prepare("
+    SELECT $sel_sql
+    FROM (
+        SELECT
+            b.book_code,
+            b.book_name,
+            COALESCE(b.class_level::text,'')  AS class_level,
+            COALESCE(b.is_translated,FALSE)   AS is_translated,
+            COALESCE(b.book_type,'TextBook')  AS book_type,
+            :fy                               AS fiscal_code,
+            COALESCE(SUM(CASE WHEN d.deleted_at IS NULL AND d.deno_year=:fy2 THEN d.total_qty ELSE 0 END),0) AS deno_qty
+        FROM books b
+        LEFT JOIN deno d ON d.book_code=b.book_code AND d.deno_year=:fy3 AND d.deleted_at IS NULL
+        GROUP BY b.book_code,b.book_name,b.class_level,b.is_translated,b.book_type
+    ) AS d_agg
+    $join_sql
+    WHERE $outer_where_sql
+    ORDER BY $sort_expr $sort_dir
+");
+$stmt->execute($main_params);
+$recon_data = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+/* ─── Deno tab: unique FY list from deno.deno_year ─── */
+$deno_fy_cols = $conn->query("
+    SELECT DISTINCT d.deno_year AS fiscal_code,
+           COALESCE(f.fiscal_name, d.deno_year) AS fiscal_name
+    FROM deno d
+    LEFT JOIN fiscal_years f ON f.fiscal_code = d.deno_year
+    WHERE d.deleted_at IS NULL AND d.deno_year IS NOT NULL
+    ORDER BY fiscal_code DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+/* ─── Deno tab: all books × all FY pivot ─── */
+// Build pivot: one row per book, SUM per deno_year column
+$deno_pivot_stmt = $conn->query("
+    SELECT
+        b.book_code,
+        b.book_name,
+        COALESCE(b.class_level::text,'') AS class_level,
+        COALESCE(b.is_translated,FALSE)  AS is_translated,
+        d.deno_year                      AS fy_code,
+        SUM(d.total_qty)                 AS deno_qty
+    FROM books b
+    LEFT JOIN deno d ON d.book_code=b.book_code AND d.deleted_at IS NULL AND d.deno_year IS NOT NULL
+    GROUP BY b.book_code,b.book_name,b.class_level,b.is_translated,d.deno_year
+    ORDER BY b.book_name, d.deno_year DESC
+");
+$deno_pivot_raw = $deno_pivot_stmt->fetchAll(PDO::FETCH_ASSOC);
+
+// Pivot into: book_code => [book_name, class_level, is_translated, fy_code => qty, ...]
+$deno_pivot = [];
+foreach ($deno_pivot_raw as $pr) {
+    $bc = $pr['book_code'];
+    if (!isset($deno_pivot[$bc])) {
+        $deno_pivot[$bc] = [
+            'book_code'    => $bc,
+            'book_name'    => $pr['book_name'],
+            'class_level'  => $pr['class_level'],
+            'is_translated'=> $pr['is_translated'],
+            'total_all_fy' => 0,
+        ];
+        foreach ($deno_fy_cols as $fc) {
+            $deno_pivot[$bc]['fy_'.$fc['fiscal_code']] = 0;
+        }
+    }
+    if ($pr['fy_code']) {
+        $deno_pivot[$bc]['fy_'.$pr['fy_code']] = (int)$pr['deno_qty'];
+        $deno_pivot[$bc]['total_all_fy'] += (int)$pr['deno_qty'];
+    }
+}
+$deno_pivot = array_values($deno_pivot);
+
+/* ─── Totals ─── */
+$totals = ['deno'=>0];
+foreach ($modules as $m) $totals[$m['slug']]=0;
+foreach ($recon_data as $r) {
+    $totals['deno'] += (int)$r['deno_qty'];
+    foreach ($modules as $m) $totals[$m['slug']] += (int)($r[$m['slug'].'_qty']??0);
+}
+$books_count = count($recon_data);
+
+/* ─── Truncate counts (preview for UI) ─── */
+$trunc_counts = [];
+foreach ($modules as $m) {
+    $c = $conn->prepare("SELECT COUNT(*) FROM {$m['tbl']} WHERE fiscal_code=:fy");
+    $c->execute([':fy'=>$sel_fy]);
+    $trunc_counts[$m['slug']] = (int)$c->fetchColumn();
+}
+
+/* ─── Price fallback ─── */
+function resolve_price($r, $slug, $modules) {
+    $p = floatval($r[$slug.'_price']??0); if ($p>0) return $p;
+    $mp = floatval($r['marketing_price']??0); if ($mp>0) return $mp;
+    foreach ($modules as $m) {
+        if ($m['slug']===$slug) continue;
+        $op = floatval($r[$m['slug'].'_price']??0); if ($op>0) return $op;
+    }
+    return 0;
+}
+
+/* ─── Closing balance evaluator ─── */
+function eval_cb($formula, $row, $modules) {
+    if (!$formula) return null;
+    $e = strtolower(trim($formula));
+    foreach ($modules as $m) {
+        $s = strtolower($m['slug']);
+        $q = (int)($row[$m['slug'].'_qty']??0);
+        $e = preg_replace('/\b'.preg_quote($s,'/').'_qty\b/', $q, $e);
+        $e = preg_replace('/\b'.preg_quote($s,'/').'(?!_)\b/', $q, $e);
+    }
+    $e = preg_replace('/\bdeno_qty\b/', (int)($row['deno_qty']??0), $e);
+    $e = preg_replace('/\bdeno\b/',     (int)($row['deno_qty']??0), $e);
+    if (!preg_match('/^[\d\s\+\-\*\/\(\)\.]+$/', $e)) return null;
+    try { return @eval("return ($e);"); } catch(Throwable $ex) { return null; }
+}
+
+/* ─── Export ─── */
+if (isset($_GET['export'])) {
+    $fn = 'recon_'.($sel_fy?:'all').'_'.date('Y-m-d');
+    $cols = ['SN','Book Code','Book Name','Class','FY','Trans','Deno Qty'];
+    foreach ($modules as $m) { $cols[]=$m['label'].' Price'; $cols[]=$m['label'].' Qty'; $cols[]=$m['label'].' Total'; }
+    foreach ($modules as $m) { $cols[]='Var '.$m['label'].' vs Deno'; }
+    if ($cb_formula) $cols[] = 'Closing Bal';
+    if ($_GET['export']==='csv') {
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment;filename="'.$fn.'.csv"');
+        $out=fopen('php://output','w'); fputcsv($out,$cols);
+        $sn=1;
+        foreach ($recon_data as $r) {
+            $row=[$sn++,$r['book_code'],$r['book_name'],$r['class_level'],$r['fy_code'],$r['is_translated']?'Y':'N',(int)$r['deno_qty']];
+            foreach ($modules as $m) { $p=resolve_price($r,$m['slug'],$modules); $q=(int)($r[$m['slug'].'_qty']??0); $row[]=$p;$row[]=$q;$row[]=number_format($p*$q,2); }
+            foreach ($modules as $m) { $row[]=((int)($r[$m['slug'].'_qty']??0))-(int)$r['deno_qty']; }
+            if ($cb_formula) $row[]=eval_cb($cb_formula,$r,$modules)??'';
+            fputcsv($out,$row);
+        }
+        fclose($out); exit;
+    }
+    if ($_GET['export']==='excel') {
+        header('Content-Type: application/vnd.ms-excel');
+        header('Content-Disposition: attachment;filename="'.$fn.'.xls"');
+        echo "<table border='1'><tr>"; foreach($cols as $c) echo "<th>".htmlspecialchars($c)."</th>"; echo "</tr>";
+        $sn=1;
+        foreach ($recon_data as $r) {
+            $pr=[$sn++,$r['book_code'],htmlspecialchars($r['book_name']),$r['class_level'],$r['fy_code'],$r['is_translated']?'Y':'N',(int)$r['deno_qty']];
+            foreach($modules as $m){$p=resolve_price($r,$m['slug'],$modules);$q=(int)($r[$m['slug'].'_qty']??0);$pr[]=$p;$pr[]=$q;$pr[]=number_format($p*$q,2);}
+            foreach($modules as $m) $pr[]=((int)($r[$m['slug'].'_qty']??0))-(int)$r['deno_qty'];
+            if($cb_formula) $pr[]=eval_cb($cb_formula,$r,$modules)??'';
+            echo "<tr>"; foreach($pr as $v) echo "<td>".htmlspecialchars((string)$v)."</td>"; echo "</tr>"; $sn++;
+        }
+        echo "</table>"; exit;
+    }
+}
+
+$flash=$_SESSION['flash']??null; unset($_SESSION['flash']);
+
+/* ─── FY label map ─── */
+$fy_label_map = [];
+foreach ($all_fiscal_years as $fy) $fy_label_map[$fy['fiscal_code']] = $fy['fiscal_name'];
+
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
+?>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stock Reconciliation</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+:root{
+  --bg:#f8fafc;--s:#fff;--s2:#f1f5f9;--bd:#e2e8f0;--bd2:#cbd5e1;
+  --ac:#2563eb;--acl:#eff6ff;--acd:#1d4ed8;
+  --ok:#16a34a;--okl:#f0fdf4;--er:#dc2626;--erl:#fef2f2;
+  --wa:#d97706;--wal:#fffbeb;
+  --tx:#0f172a;--t2:#475569;--mu:#94a3b8;
+  --mo:'JetBrains Mono',monospace;--fn:'Inter',sans-serif;--r:8px;--r2:4px;
+  --sh:0 1px 3px rgba(0,0,0,.08),0 1px 2px rgba(0,0,0,.06);
+  --sh2:0 4px 12px rgba(0,0,0,.1);
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--tx);font-family:var(--fn);font-size:14px;min-height:100vh}
+.pw{max-width:1900px;margin:0 auto;padding:18px 16px}
+
+.ph{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px}
+.ph h1{font-size:19px;font-weight:700;display:flex;align-items:center;gap:8px}
+.ph p{font-size:11px;color:var(--mu);margin-top:2px;font-family:var(--mo)}
+
+.flash{padding:11px 14px;border-radius:var(--r);font-weight:500;margin-bottom:14px;font-size:13px;display:flex;align-items:center;gap:8px}
+.flash-s{background:var(--okl);color:var(--ok);border:1px solid #bbf7d0}
+.flash-d{background:var(--erl);color:var(--er);border:1px solid #fecaca}
+
+/* Filter bar */
+.fb{background:var(--s);border:1px solid var(--bd);border-radius:var(--r);padding:12px 14px;display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:14px;box-shadow:var(--sh)}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fl{font-size:10px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.6px}
+.fc{background:var(--s2);border:1px solid var(--bd2);color:var(--tx);border-radius:var(--r2);padding:7px 10px;font-size:13px;font-family:var(--fn);min-width:130px;transition:border-color .15s}
+.fc:focus{outline:none;border-color:var(--ac);background:#fff}
+.fc::placeholder{color:var(--mu)}
+
+/* Book search dropdown */
+.bdd{position:relative}
+.bdo{position:absolute;top:calc(100%+4px);left:0;right:0;background:#fff;border:1px solid var(--bd2);border-radius:var(--r);box-shadow:var(--sh2);max-height:240px;overflow-y:auto;z-index:400;display:none;min-width:320px}
+.bdi{padding:8px 12px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--bd);transition:background .1s;line-height:1.4}
+.bdi:hover{background:var(--acl)}
+.bdi .bdc{font-family:var(--mo);font-size:11px;color:var(--ac);font-weight:600}
+.bdi .bdm{font-size:11px;color:var(--mu)}
+
+/* Buttons */
+.btn{display:inline-flex;align-items:center;gap:5px;padding:7px 13px;border:none;border-radius:var(--r2);cursor:pointer;font-size:13px;font-weight:500;font-family:var(--fn);transition:all .15s;text-decoration:none;white-space:nowrap}
+.bp{background:var(--ac);color:#fff}.bp:hover{background:var(--acd)}
+.bs{background:var(--ok);color:#fff}.bs:hover{background:#15803d}
+.bi{background:#0284c7;color:#fff}.bi:hover{background:#0369a1}
+.bw{background:var(--wa);color:#fff}.bw:hover{background:#b45309}
+.bo{background:#fff;border:1px solid var(--bd2);color:var(--t2)}.bo:hover{border-color:var(--ac);color:var(--ac)}
+.bd{background:var(--er);color:#fff}.bd:hover{background:#b91c1c}
+.bsm{padding:5px 10px;font-size:12px}
+.bxs{padding:3px 8px;font-size:11px}
+
+/* Summary */
+.sg{display:grid;grid-template-columns:repeat(auto-fill,minmax(148px,1fr));gap:10px;margin-bottom:14px}
+.sc{background:var(--s);border:1px solid var(--bd);border-radius:var(--r);padding:12px 13px;box-shadow:var(--sh)}
+.sl{font-size:10px;font-weight:600;color:var(--mu);text-transform:uppercase;letter-spacing:.4px;margin-bottom:4px}
+.sv{font-size:20px;font-weight:700;font-family:var(--mo)}
+.ss{font-size:10px;color:var(--mu);margin-top:2px}
+
+/* Tabs */
+.tabs{display:flex;border-bottom:2px solid var(--bd);margin-bottom:14px;flex-wrap:nowrap;overflow-x:auto;gap:0}
+.tab{padding:8px 14px;cursor:pointer;border-bottom:2px solid transparent;margin-bottom:-2px;color:var(--t2);font-size:13px;font-weight:500;transition:all .15s;background:none;border-top:none;border-left:none;border-right:none;font-family:var(--fn);white-space:nowrap;flex-shrink:0}
+.tab:hover{color:var(--ac);background:var(--acl);border-radius:4px 4px 0 0}
+.tab.active{color:var(--ac);border-bottom-color:var(--ac);font-weight:600}
+.tp{display:none}.tp.active{display:block}
+
+/* Card */
+.card{background:var(--s);border:1px solid var(--bd);border-radius:var(--r);overflow:hidden;box-shadow:var(--sh);margin-bottom:12px}
+.ch{padding:10px 14px;display:flex;align-items:center;gap:9px;background:var(--s2);border-bottom:1px solid var(--bd)}
+.ci{width:27px;height:27px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
+.ct{font-weight:600;font-size:13px;color:var(--tx);flex:1;min-width:0}
+.cbg{font-size:11px;padding:2px 7px;border-radius:20px;font-weight:600;font-family:var(--mo);background:var(--s);border:1px solid var(--bd);color:var(--t2);white-space:nowrap}
+.cbdy{padding:14px}
+
+/* FY selector within module tabs */
+.fy-sel-bar{background:var(--acl);border:1px solid #bfdbfe;border-radius:var(--r2);padding:10px 14px;display:flex;align-items:center;gap:12px;margin-bottom:10px;flex-wrap:wrap}
+.fy-sel-bar label{font-size:12px;font-weight:600;color:var(--ac)}
+
+/* Tables */
+.tw{overflow-x:auto}
+table.rt{width:100%;border-collapse:collapse;font-size:13px}
+table.rt th{background:var(--s2);color:var(--t2);font-size:11px;text-transform:uppercase;letter-spacing:.4px;padding:9px 10px;border-bottom:2px solid var(--bd);white-space:nowrap;text-align:left;font-weight:600;cursor:pointer;user-select:none;position:sticky;top:0;z-index:2}
+table.rt th:hover{background:#e2e8f0;color:var(--tx)}
+table.rt th.sa::after{content:' ↑';color:var(--ac)}
+table.rt th.sd::after{content:' ↓';color:var(--ac)}
+table.rt td{padding:7px 10px;border-bottom:1px solid var(--bd);vertical-align:middle}
+table.rt tr:hover td{background:var(--acl)}
+table.rt tr:nth-child(even) td{background:#fafbfc}
+table.rt tr:nth-child(even):hover td{background:var(--acl)}
+table.rt input[type="number"],table.rt input[type="text"]{background:#fff;border:1px solid var(--bd2);color:var(--tx);border-radius:var(--r2);padding:5px 8px;font-size:12px;width:100%;font-family:var(--mo);transition:border-color .15s}
+table.rt input:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 2px rgba(37,99,235,.12)}
+
+/* Pills */
+.pill{display:inline-block;padding:2px 7px;border-radius:20px;font-size:11px;font-weight:600}
+.po{background:var(--okl);color:var(--ok);border:1px solid #bbf7d0}
+.pb{background:var(--erl);color:var(--er);border:1px solid #fecaca}
+.pw2{background:var(--wal);color:var(--wa);border:1px solid #fde68a}
+.btg{display:inline-block;padding:1px 5px;border-radius:3px;font-size:10px;font-weight:600;font-family:var(--mo)}
+.btg-t{background:#dbeafe;color:#1e40af}
+.btg-c{background:#f3e8ff;color:#6b21a8}
+.ph2{display:block;font-size:10px;padding:1px 5px;border-radius:3px;font-family:var(--mo);margin-top:2px;background:#fef9c3;color:#713f12;border:1px solid #fde68a}
+
+/* Variance */
+.vp{color:var(--ok);font-weight:600;font-family:var(--mo)}
+.vn{color:var(--er);font-weight:600;font-family:var(--mo)}
+.vz{color:var(--mu);font-family:var(--mo)}
+
+.ab{display:flex;gap:7px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.mono{font-family:var(--mo)}
+
+/* Comparison selector */
+.csel{background:var(--s);border:1px solid var(--bd);border-radius:var(--r);padding:13px 14px;margin-bottom:12px;box-shadow:var(--sh)}
+.csel h4{font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:9px}
+.cchks{display:flex;gap:7px;flex-wrap:wrap}
+.cck{display:flex;align-items:center;gap:6px;padding:5px 12px;border-radius:20px;border:1.5px solid var(--bd2);cursor:pointer;font-size:12px;font-weight:600;background:#fff;transition:all .15s;user-select:none}
+.cck input{width:14px;height:14px;cursor:pointer}
+.cck.on{background:color-mix(in srgb,currentColor 8%,white)}
+
+/* Formula builder */
+.fbox{background:var(--s);border:1px solid var(--bd);border-radius:var(--r);padding:13px 14px;margin-bottom:12px;box-shadow:var(--sh)}
+.fbox h4{font-size:11px;font-weight:600;color:var(--t2);text-transform:uppercase;letter-spacing:.4px;margin-bottom:9px}
+.ftoks{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:9px}
+.ftok{padding:4px 9px;border-radius:4px;font-family:var(--mo);font-size:11px;cursor:pointer;border:1.5px solid;transition:all .15s;font-weight:500}
+.ftok:hover{transform:translateY(-1px);box-shadow:var(--sh)}
+.fi{width:100%;padding:8px 11px;border:1px solid var(--bd2);border-radius:var(--r2);font-family:var(--mo);font-size:13px;color:var(--tx);background:#fff;transition:border-color .15s}
+.fi:focus{outline:none;border-color:var(--ac);box-shadow:0 0 0 2px rgba(37,99,235,.12)}
+.fpv{font-size:12px;color:var(--t2);margin-top:8px;font-family:var(--mo);padding:6px 10px;background:var(--s2);border-radius:var(--r2)}
+
+/* Closing balance col */
+.cbc{background:#fffbeb!important;font-weight:700;font-family:var(--mo);color:#92400e}
+
+/* Truncate box */
+.trunc-box{background:var(--erl);border:1px solid #fecaca;border-radius:var(--r);padding:12px 14px;margin-bottom:10px}
+.trunc-box h5{font-size:12px;font-weight:700;color:var(--er);margin-bottom:8px}
+
+/* Module manager */
+.mmgr{background:var(--s);border:1px solid var(--bd);border-radius:var(--r);padding:14px;margin-bottom:12px;box-shadow:var(--sh)}
+.mmgr h4{font-size:13px;font-weight:600;margin-bottom:11px}
+
+/* Deno pivot: FY sub-row */
+.fy-row td{background:#fafbfc}
+.fy-row:hover td{background:var(--acl)!important}
+
+@media(max-width:768px){.sg{grid-template-columns:1fr 1fr}}
+@media print{
+  body{background:#fff;font-size:11px}
+  .fb,.tabs,.ab,.csel,.fbox,.mmgr,.btn,form,.fy-sel-bar{display:none!important}
+  .card{border:1px solid #ccc;box-shadow:none}
+  table.rt th{background:#f0f0f0!important;font-size:10px}
+  table.rt input{border:none;background:transparent}
+  table.rt td{font-size:10px;padding:4px 6px}
+}
+</style>
+</head>
+<body>
+<div class="pw">
+
+<?php if($flash): ?>
+<div class="flash flash-<?= $flash['type']==='success'?'s':'d' ?>">
+    <?= $flash['type']==='success'?'✓':'✕' ?> <?= htmlspecialchars($flash['msg']) ?>
+</div>
+<?php endif; ?>
+
+<div class="ph">
+    <div>
+        <h1>📚 Stock Reconciliation</h1>
+        <p>FY <?= htmlspecialchars($fy_label_map[$sel_fy] ?? $sel_fy) ?> (<?= htmlspecialchars($sel_fy) ?>) · <?= $books_count ?> books · <?= count($modules) ?> modules</p>
+    </div>
+    <div style="display:flex;gap:7px;flex-wrap:wrap">
+        <a href="?<?= http_build_query(array_merge($_GET,['export'=>'excel'])) ?>" class="btn bs bsm">📊 Excel</a>
+        <a href="?<?= http_build_query(array_merge($_GET,['export'=>'csv'])) ?>"   class="btn bi bsm">📥 CSV</a>
+        <button onclick="window.print()" class="btn bw bsm">🖨️ Print</button>
+    </div>
+</div>
+
+<!-- Filters -->
+<div class="fb">
+<form method="get" style="display:contents" id="ff">
+    <div class="fg">
+        <div class="fl">Fiscal Year</div>
+        <select name="fiscal_year" class="fc" onchange="document.getElementById('ff').submit()">
+            <?php foreach($deno_fiscal_years as $fy): ?>
+            <option value="<?= htmlspecialchars($fy['fiscal_code']) ?>" <?= $sel_fy===$fy['fiscal_code']?'selected':'' ?>>
+                <?= htmlspecialchars($fy['fiscal_name'] ?: $fy['fiscal_code']) ?>
+            </option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+    <div class="fg">
+        <div class="fl">Book (code · name · class · FY)</div>
+        <div class="bdd">
+            <input type="text" id="bs" class="fc" autocomplete="off" style="min-width:240px"
+                   placeholder="Search book code, name, class…"
+                   value="<?php
+                       if ($sel_book) {
+                           foreach ($all_deno_books as $b) {
+                               if ($b['book_code']===$sel_book) {
+                                   echo htmlspecialchars($b['book_code'].' — '.$b['book_name']);
+                                   break;
+                               }
+                           }
+                       }
+                   ?>">
+            <input type="hidden" name="book_code" id="bh" value="<?= htmlspecialchars($sel_book) ?>">
+            <div class="bdo" id="bdo">
+                <div class="bdi" data-code="" data-text="All Books"><strong>All Books</strong></div>
+                <?php
+                $seen_books = [];
+                foreach ($all_deno_books as $b):
+                    // show one entry per book (latest FY, already sorted DESC)
+                    if (isset($seen_books[$b['book_code']])) continue;
+                    $seen_books[$b['book_code']] = true;
+                ?>
+                <div class="bdi"
+                     data-code="<?= htmlspecialchars($b['book_code']) ?>"
+                     data-text="<?= htmlspecialchars($b['book_code'].' — '.$b['book_name']) ?>">
+                    <span class="bdc"><?= htmlspecialchars($b['book_code']) ?></span>
+                    <?= htmlspecialchars($b['book_name']) ?>
+                    <?php if($b['class_level']): ?>
+                    <span class="bdm">· Class <?= htmlspecialchars($b['class_level']) ?></span>
+                    <?php endif; ?>
+                    <span class="bdm">· FY <?= htmlspecialchars($b['fiscal_name']?:($b['latest_fy']??'')) ?></span>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+    <div class="fg">
+        <div class="fl">Translated</div>
+        <select name="translated" class="fc">
+            <option value="">All</option>
+            <option value="1" <?= $sel_trans==='1'?'selected':'' ?>>Translated</option>
+            <option value="0" <?= $sel_trans==='0'?'selected':'' ?>>Not Translated</option>
+        </select>
+    </div>
+    <div class="fg">
+        <div class="fl">Class Level</div>
+        <select name="class_level" class="fc">
+            <option value="">All Classes</option>
+            <?php foreach ($class_levels as $cl): ?>
+            <option value="<?= htmlspecialchars((string)$cl) ?>" <?= $sel_class==(string)$cl?'selected':'' ?>>Class <?= htmlspecialchars((string)$cl) ?></option>
+            <?php endforeach; ?>
+        </select>
+    </div>
+    <div class="fg">
+        <div class="fl">Search</div>
+        <input type="text" name="search" class="fc" placeholder="Book name / code…" value="<?= htmlspecialchars($search_term) ?>">
+    </div>
+    <input type="hidden" name="sort" value="<?= htmlspecialchars($sort_col) ?>">
+    <input type="hidden" name="dir"  value="<?= htmlspecialchars($sort_dir) ?>">
+    <div class="fg" style="flex-direction:row;gap:6px">
+        <button type="submit" class="btn bp">🔍 Filter</button>
+        <a href="<?= $_SERVER['PHP_SELF'] ?>" class="btn bo">✕</a>
+    </div>
+</form>
+</div>
+
+<!-- Summary cards -->
+<div class="sg">
+    <div class="sc"><div class="sl">📚 Books</div><div class="sv"><?= number_format($books_count) ?></div><div class="ss">In deno for FY <?= htmlspecialchars($sel_fy) ?></div></div>
+    <div class="sc"><div class="sl">📘 Deno Qty</div><div class="sv" style="color:var(--ac)"><?= number_format($totals['deno']) ?></div><div class="ss">SUM(total_qty)</div></div>
+    <?php foreach ($modules as $m): ?>
+    <div class="sc">
+        <div class="sl"><?= $m['icon'] ?> <?= htmlspecialchars($m['label']) ?></div>
+        <div class="sv" style="color:<?= htmlspecialchars($m['color']) ?>"><?= number_format($totals[$m['slug']]) ?></div>
+        <div class="ss"><?= $totals['deno']>0?round($totals[$m['slug']]/$totals['deno']*100,1).'% of Deno':'' ?></div>
+    </div>
+    <?php endforeach; ?>
+</div>
+
+<!-- Tabs -->
+<div class="tabs" id="mainTabs">
+    <button class="tab active" onclick="switchTab('overview',this)">📊 Overview</button>
+    <button class="tab" onclick="switchTab('deno',this)">📘 Deno</button>
+    <?php foreach ($modules as $m): ?>
+    <button class="tab" onclick="switchTab('<?= htmlspecialchars($m['slug']) ?>',this)">
+        <?= $m['icon'] ?> <?= htmlspecialchars($m['label']) ?>
+    </button>
+    <?php endforeach; ?>
+    <button class="tab" onclick="switchTab('comparison',this)">⚖️ Comparison</button>
+    <button class="tab" onclick="switchTab('analysis',this)">📈 Analysis</button>
+    <button class="tab" onclick="switchTab('manage',this)">⚙️ Modules</button>
+</div>
+
+<!-- ══ OVERVIEW ══ -->
+<div class="tp active" id="tab-overview">
+<div class="card">
+    <div class="ch">
+        <div class="ci" style="background:var(--acl)">📋</div>
+        <div class="ct">All Modules — FY <?= htmlspecialchars($fy_label_map[$sel_fy]??$sel_fy) ?></div>
+        <span class="cbg"><?= $books_count ?> books from deno</span>
+    </div>
+    <div class="tw">
+    <table class="rt">
+        <thead>
+        <tr>
+            <th onclick="srt('overview','book_code')" rowspan="2">Code</th>
+            <th onclick="srt('overview','book_name')" rowspan="2">Book Name</th>
+            <th onclick="srt('overview','class_level')" rowspan="2">Class</th>
+            <th rowspan="2">Trans</th>
+            <th rowspan="2">FY</th>
+            <th style="color:var(--ac)" onclick="srt('overview','deno_qty')" rowspan="2">Deno Qty</th>
+            <?php foreach ($modules as $m): ?>
+            <th colspan="3" style="text-align:center;color:<?= htmlspecialchars($m['color']) ?>;background:color-mix(in srgb,<?= htmlspecialchars($m['color']) ?> 6%,white)">
+                <?= $m['icon'] ?> <?= htmlspecialchars($m['label']) ?>
+            </th>
+            <?php endforeach; ?>
+            <?php if($cb_formula): ?><th style="background:var(--wal);color:var(--wa)" rowspan="2">Closing Bal</th><?php endif; ?>
+            <th rowspan="2">Status</th>
+        </tr>
+        <tr>
+            <?php foreach ($modules as $m): ?>
+            <th style="font-size:10px">Price</th><th style="font-size:10px">Qty</th><th style="font-size:10px">Total</th>
+            <?php endforeach; ?>
+        </tr>
+        </thead>
+        <tbody>
+        <?php foreach ($recon_data as $r):
+            $all_ok=true; $any=false;
+            foreach($modules as $m){if((int)($r[$m['slug'].'_qty']??0)!=(int)$r['deno_qty']) $all_ok=false; if((int)($r[$m['slug'].'_qty']??0)>0) $any=true;}
+            $cbv=$cb_formula?eval_cb($cb_formula,$r,$modules):null;
+        ?>
+        <tr>
+            <td class="mono" style="color:var(--ac);font-size:12px"><?= htmlspecialchars($r['book_code']) ?></td>
+            <td style="font-weight:500;white-space:nowrap"><?= htmlspecialchars($r['book_name']) ?></td>
+            <td><?= $r['class_level']?'<span class="btg btg-c">'.htmlspecialchars($r['class_level']).'</span>':'' ?></td>
+            <td><?= $r['is_translated']?'<span class="btg btg-t">T</span>':'' ?></td>
+            <td class="mono" style="font-size:11px"><?= htmlspecialchars($fy_label_map[$r['fy_code']]??$r['fy_code']) ?></td>
+            <td class="mono" style="font-weight:700;color:var(--ac)"><?= number_format((int)$r['deno_qty']) ?></td>
+            <?php foreach ($modules as $m):
+                $p=resolve_price($r,$m['slug'],$modules); $q=(int)($r[$m['slug'].'_qty']??0);
+                $own=floatval($r[$m['slug'].'_price']??0)>0;
+            ?>
+            <td class="mono" style="font-size:12px;color:<?= $own?'inherit':'var(--wa)' ?>">
+                <?= number_format($p,2) ?>
+                <?php if(!$own&&$p>0): ?><span class="ph2">↑ fallback</span><?php endif; ?>
+            </td>
+            <td class="mono" style="font-weight:700;color:<?= htmlspecialchars($m['color']) ?>"><?= number_format($q) ?></td>
+            <td class="mono" style="font-size:12px"><?= number_format($p*$q,2) ?></td>
+            <?php endforeach; ?>
+            <?php if($cb_formula): ?><td class="cbc"><?= $cbv!==null?number_format((float)$cbv,2):'—' ?></td><?php endif; ?>
+            <td>
+                <?php if(!$any): ?><span class="pill pw2">— None</span>
+                <?php elseif($all_ok): ?><span class="pill po">✓ Match</span>
+                <?php else: ?><span class="pill pb">⚠ Diff</span><?php endif; ?>
+            </td>
+        </tr>
+        <?php endforeach; ?>
+        <?php if(empty($recon_data)): ?><tr><td colspan="30" style="text-align:center;padding:28px;color:var(--mu)">No books found in deno for FY <?= htmlspecialchars($sel_fy) ?>.</td></tr><?php endif; ?>
+        </tbody>
+    </table>
+    </div>
+</div>
+</div>
+
+<!-- ══ DENO TAB — one row per book per FY ══ -->
+<div class="tp" id="tab-deno">
+<div class="card">
+    <div class="ch">
+        <div class="ci" style="background:var(--acl)">📘</div>
+        <div class="ct">Deno — SUM(total_qty) per book per fiscal year</div>
+        <span class="cbg" style="color:var(--ac)">Read-only · All FYs</span>
+    </div>
+    <div class="tw">
+    <table class="rt" id="denoTable">
+        <thead><tr>
+            <th onclick="srt2('denoTable','code')">Code</th>
+            <th onclick="srt2('denoTable','name')">Book Name</th>
+            <th onclick="srt2('denoTable','cls')">Class</th>
+            <th>Trans</th>
+            <th onclick="srt2('denoTable','fy')">Fiscal Year</th>
+            <th onclick="srt2('denoTable','qty')">Total Qty (SUM)</th>
+        </tr></thead>
+        <tbody>
+        <?php foreach ($deno_all as $r): ?>
+        <tr data-code="<?= htmlspecialchars($r['book_code']) ?>"
+            data-name="<?= htmlspecialchars($r['book_name']) ?>"
+            data-cls="<?= htmlspecialchars($r['class_level']) ?>"
+            data-fy="<?= htmlspecialchars($r['fy_code']) ?>"
+            data-qty="<?= (int)$r['deno_qty'] ?>">
+            <td class="mono" style="color:var(--ac);font-size:12px"><?= htmlspecialchars($r['book_code']) ?></td>
+            <td style="font-weight:500"><?= htmlspecialchars($r['book_name']) ?></td>
+            <td><?= $r['class_level']?'<span class="btg btg-c">'.htmlspecialchars($r['class_level']).'</span>':'' ?></td>
+            <td><?= $r['is_translated']?'<span class="btg btg-t">T</span>':'' ?></td>
+            <td>
+                <span class="mono" style="font-size:11px;font-weight:600;color:var(--ac)"><?= htmlspecialchars($r['fy_code']) ?></span>
+                <span style="font-size:11px;color:var(--mu);margin-left:4px"><?= htmlspecialchars($r['fy_name']?:'') ?></span>
+            </td>
+            <td class="mono" style="font-size:16px;font-weight:700;color:var(--ac)"><?= number_format((int)$r['deno_qty']) ?></td>
+        </tr>
+        <?php endforeach; ?>
+        <?php if(empty($deno_all)): ?><tr><td colspan="6" style="text-align:center;padding:28px;color:var(--mu)">No deno records found.</td></tr><?php endif; ?>
+        </tbody>
+    </table>
+    </div>
+</div>
+</div>
+
+<?php foreach ($modules as $m):
+    $slug=$m['slug']; $label=$m['label']; $color=$m['color']; $icon=$m['icon'];
+    $tc = $trunc_counts[$slug] ?? 0;
+?>
+<!-- ══ MODULE: <?= htmlspecialchars($label) ?> ══ -->
+<div class="tp" id="tab-<?= htmlspecialchars($slug) ?>">
+
+    <!-- Truncate box -->
+    <div class="trunc-box">
+        <h5>🗑 Truncate <?= htmlspecialchars($label) ?> Data</h5>
+        <form method="post" onsubmit="return confirmTrunc('<?= htmlspecialchars($label) ?>',this)"
+              style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+            <input type="hidden" name="action" value="truncate_module">
+            <input type="hidden" name="trunc_slug" value="<?= htmlspecialchars($slug) ?>">
+            <div class="fg">
+                <div class="fl">Select Fiscal Year to Truncate</div>
+                <select name="trunc_fy" class="fc" id="trunc-fy-<?= htmlspecialchars($slug) ?>"
+                        onchange="updateTruncCount('<?= htmlspecialchars($slug) ?>')">
+                    <?php foreach ($all_fiscal_years as $fy): ?>
+                    <option value="<?= htmlspecialchars($fy['fiscal_code']) ?>" <?= $sel_fy===$fy['fiscal_code']?'selected':'' ?>>
+                        <?= htmlspecialchars($fy['fiscal_name']) ?> (<?= htmlspecialchars($fy['fiscal_code']) ?>)
+                    </option>
+                    <?php endforeach; ?>
+                </select>
+            </div>
+            <div class="fg">
+                <div class="fl">Rows to be deleted</div>
+                <div id="tc-<?= htmlspecialchars($slug) ?>" style="padding:7px 12px;background:#fff;border:1px solid #fecaca;border-radius:var(--r2);font-family:var(--mo);font-weight:700;color:var(--er);min-width:80px">
+                    <?= $tc ?> rows
+                </div>
+            </div>
+            <button type="submit" class="btn bd bsm">🗑 Truncate</button>
+        </form>
+    </div>
+
+    <!-- Upload -->
+    <div class="card" style="margin-bottom:10px">
+        <div class="ch" style="background:color-mix(in srgb,<?= htmlspecialchars($color) ?> 7%,white)">
+            <div class="ci" style="background:color-mix(in srgb,<?= htmlspecialchars($color) ?> 15%,white)"><?= $icon ?></div>
+            <div class="ct" style="color:<?= htmlspecialchars($color) ?>">Upload CSV — <?= htmlspecialchars($label) ?></div>
+        </div>
+        <div class="cbdy">
+            <div style="background:var(--s2);border:1px solid var(--bd);border-radius:var(--r2);padding:7px 11px;font-size:12px;font-family:var(--mo);color:var(--t2);margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+                <span>Columns: <strong>book_code · book_name · fiscal_year · price · qty · notes</strong></span>
+                <button onclick="dlTpl('<?= htmlspecialchars($slug) ?>')" class="btn bo bxs">📥 Template</button>
+            </div>
+            <form method="post" enctype="multipart/form-data" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+                <input type="hidden" name="action" value="upload_csv">
+                <input type="hidden" name="upload_module" value="<?= htmlspecialchars($slug) ?>">
+                <div class="fg">
+                    <div class="fl">Upload Fiscal Year</div>
+                    <select name="upload_fiscal_code" class="fc">
+                        <?php foreach ($all_fiscal_years as $fy): ?>
+                        <option value="<?= htmlspecialchars($fy['fiscal_code']) ?>" <?= $sel_fy===$fy['fiscal_code']?'selected':'' ?>>
+                            <?= htmlspecialchars($fy['fiscal_name']) ?>
+                        </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+                <div class="fg"><div class="fl">CSV File</div>
+                    <input type="file" name="csv_file" accept=".csv" class="fc" style="padding:5px"></div>
+                <button type="submit" class="btn bp">⬆ Upload</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- FY selector for manual entry -->
+    <div class="fy-sel-bar">
+        <label>📅 Entry Fiscal Year:</label>
+        <select id="mod-fy-<?= htmlspecialchars($slug) ?>" class="fc"
+                style="min-width:180px"
+                onchange="reloadModuleFY('<?= htmlspecialchars($slug) ?>', this.value)">
+            <?php foreach ($deno_fiscal_years as $fy): ?>
+            <option value="<?= htmlspecialchars($fy['fiscal_code']) ?>" <?= $sel_fy===$fy['fiscal_code']?'selected':'' ?>>
+                <?= htmlspecialchars($fy['fiscal_name']?:$fy['fiscal_code']) ?> (<?= htmlspecialchars($fy['fiscal_code']) ?>)
+            </option>
+            <?php endforeach; ?>
+        </select>
+        <span style="font-size:12px;color:var(--ac)">Showing books from deno for selected FY</span>
+    </div>
+
+    <!-- Manual entry table -->
+    <div class="card">
+        <div class="ch" style="background:color-mix(in srgb,<?= htmlspecialchars($color) ?> 7%,white)">
+            <div class="ci" style="background:color-mix(in srgb,<?= htmlspecialchars($color) ?> 15%,white)"><?= $icon ?></div>
+            <div class="ct" style="color:<?= htmlspecialchars($color) ?>"><?= htmlspecialchars($label) ?> — Manual Entry</div>
+            <span class="cbg"><?= count($recon_data) ?> books for FY <?= htmlspecialchars($sel_fy) ?></span>
+        </div>
+        <form method="post" id="form-<?= htmlspecialchars($slug) ?>">
+            <input type="hidden" name="action" value="save_<?= htmlspecialchars($slug) ?>">
+            <input type="hidden" name="page_fy" value="<?= htmlspecialchars($sel_fy) ?>">
+            <input type="hidden" name="book_filter" value="<?= htmlspecialchars($sel_book) ?>">
+            <input type="hidden" name="trans_filter" value="<?= htmlspecialchars($sel_trans) ?>">
+            <input type="hidden" name="class_filter" value="<?= htmlspecialchars($sel_class) ?>">
+            <input type="hidden" name="search_filter" value="<?= htmlspecialchars($search_term) ?>">
+            <div class="ab" style="padding:10px 14px 0">
+                <button type="submit" class="btn bp">💾 Save All</button>
+                <button type="button" class="btn bo bsm" onclick="clearMod('<?= htmlspecialchars($slug) ?>')">✕ Clear</button>
+                <button type="button" class="btn bo bsm" onclick="autofill('<?= htmlspecialchars($slug) ?>')">🔄 Auto-fill Price</button>
+            </div>
+            <div class="tw"><table class="rt">
+                <thead><tr>
+                    <th onclick="sortMod('<?= htmlspecialchars($slug) ?>','code')">Code</th>
+                    <th onclick="sortMod('<?= htmlspecialchars($slug) ?>','name')">Book Name</th>
+                    <th onclick="sortMod('<?= htmlspecialchars($slug) ?>','cls')">Class</th>
+                    <th>Trans</th>
+                    <th onclick="sortMod('<?= htmlspecialchars($slug) ?>','fy')">FY</th>
+                    <th style="color:var(--ac)">Deno Qty</th>
+                    <th style="color:<?= htmlspecialchars($color) ?>">Price</th>
+                    <th style="color:<?= htmlspecialchars($color) ?>">Qty</th>
+                    <th style="color:<?= htmlspecialchars($color) ?>">Total</th>
+                    <th>Notes</th>
+                    <th>Saved</th>
+                </tr></thead>
+                <tbody id="tbody-<?= htmlspecialchars($slug) ?>">
+                <?php foreach ($recon_data as $i=>$r):
+                    $sp=floatval($r[$slug.'_price']??0);
+                    $dp=$sp>0?$sp:resolve_price($r,$slug,$modules);
+                    $dq=(int)($r[$slug.'_qty']??0);
+                    $fb=$sp==0&&$dp>0;
+                ?>
+                <tr data-code="<?= htmlspecialchars($r['book_code']) ?>"
+                    data-name="<?= htmlspecialchars($r['book_name']) ?>"
+                    data-cls="<?= htmlspecialchars($r['class_level']) ?>"
+                    data-fy="<?= htmlspecialchars($r['fy_code']) ?>"
+                    data-deno="<?= (int)$r['deno_qty'] ?>">
+                    <td class="mono" style="color:var(--ac);font-size:12px"><?= htmlspecialchars($r['book_code']) ?>
+                        <input type="hidden" name="rows[<?= $i ?>][book_code]"   value="<?= htmlspecialchars($r['book_code']) ?>">
+                        <input type="hidden" name="rows[<?= $i ?>][fiscal_code]" value="<?= htmlspecialchars($r['fy_code']) ?>">
+                    </td>
+                    <td style="font-weight:500;white-space:nowrap"><?= htmlspecialchars($r['book_name']) ?></td>
+                    <td><?= $r['class_level']?'<span class="btg btg-c">'.htmlspecialchars($r['class_level']).'</span>':'' ?></td>
+                    <td><?= $r['is_translated']?'<span class="btg btg-t">T</span>':'' ?></td>
+                    <td class="mono" style="font-size:11px"><?= htmlspecialchars($fy_label_map[$r['fy_code']]??$r['fy_code']) ?></td>
+                    <td class="mono" style="color:var(--ac);font-weight:600"><?= number_format((int)$r['deno_qty']) ?></td>
+                    <td style="min-width:130px">
+                        <input type="number" name="rows[<?= $i ?>][price]"
+                               id="pr-<?= htmlspecialchars($slug) ?>-<?= $i ?>"
+                               value="<?= htmlspecialchars((string)$dp) ?>" min="0" step="0.01"
+                               oninput="calcRow('<?= htmlspecialchars($slug) ?>',<?= $i ?>)">
+                        <?php if($fb): ?><span class="ph2">↑ fallback</span><?php endif; ?>
+                    </td>
+                    <td style="min-width:90px">
+                        <input type="number" name="rows[<?= $i ?>][qty]"
+                               id="qt-<?= htmlspecialchars($slug) ?>-<?= $i ?>"
+                               value="<?= $dq ?>" min="0"
+                               oninput="calcRow('<?= htmlspecialchars($slug) ?>',<?= $i ?>)">
+                    </td>
+                    <td><span id="tot-<?= htmlspecialchars($slug) ?>-<?= $i ?>" class="mono"><?= number_format($dp*$dq,2) ?></span></td>
+                    <td><input type="text" name="rows[<?= $i ?>][notes]" value="<?= htmlspecialchars($r[$slug.'_notes']??'') ?>" placeholder="…"></td>
+                    <td style="font-size:10px;color:var(--mu);font-family:var(--mo);white-space:nowrap">
+                        <?= !empty($r[$slug.'_updated'])?date('m/d H:i',strtotime($r[$slug.'_updated'])):'' ?>
+                    </td>
+                </tr>
+                <?php endforeach; ?>
+                <?php if(empty($recon_data)): ?><tr><td colspan="11" style="text-align:center;padding:24px;color:var(--mu)">No books in deno for FY <?= htmlspecialchars($sel_fy) ?>.</td></tr><?php endif; ?>
+                </tbody>
+            </table></div>
+        </form>
+    </div>
+</div>
+<?php endforeach; ?>
+
+<!-- ══ COMPARISON ══ -->
+<div class="tp" id="tab-comparison">
+    <div class="csel">
+        <h4>Select Modules to Compare</h4>
+        <div class="cchks" id="cmpChecks">
+            <label class="cck on" style="color:var(--ac)">
+                <input type="checkbox" value="deno" checked onchange="syncC(this);renderCmp()">📘 Deno
+            </label>
+            <?php foreach ($modules as $m): ?>
+            <label class="cck on" style="color:<?= htmlspecialchars($m['color']) ?>">
+                <input type="checkbox" value="<?= htmlspecialchars($m['slug']) ?>" checked onchange="syncC(this);renderCmp()">
+                <?= $m['icon'] ?> <?= htmlspecialchars($m['label']) ?>
+            </label>
+            <?php endforeach; ?>
+        </div>
+    </div>
+
+    <div class="fbox">
+        <h4>📐 Closing Balance Formula
+            <small style="font-weight:400;text-transform:none;letter-spacing:0;font-size:10px;color:var(--mu)">
+             · click tokens to build · saved per FY
+            </small>
+        </h4>
+        <div class="ftoks">
+            <span class="ftok" style="background:var(--acl);color:var(--ac);border-color:var(--ac)" onclick="ins('deno_qty')">📘 deno_qty</span>
+            <?php foreach ($modules as $m): ?>
+            <span class="ftok" style="background:color-mix(in srgb,<?= htmlspecialchars($m['color']) ?> 10%,white);color:<?= htmlspecialchars($m['color']) ?>;border-color:<?= htmlspecialchars($m['color']) ?>"
+                  onclick="ins('<?= htmlspecialchars($m['slug']) ?>_qty')"><?= $m['icon'] ?> <?= htmlspecialchars($m['slug']) ?>_qty</span>
+            <?php endforeach; ?>
+            <span class="ftok" style="background:var(--s2);color:var(--t2);border-color:var(--bd2)" onclick="ins('+')">+</span>
+            <span class="ftok" style="background:var(--s2);color:var(--t2);border-color:var(--bd2)" onclick="ins('-')">−</span>
+            <span class="ftok" style="background:var(--s2);color:var(--t2);border-color:var(--bd2)" onclick="ins('*')">×</span>
+            <span class="ftok" style="background:var(--s2);color:var(--t2);border-color:var(--bd2)" onclick="ins('/')" >÷</span>
+            <span class="ftok" style="background:var(--s2);color:var(--t2);border-color:var(--bd2)" onclick="ins('(')">(</span>
+            <span class="ftok" style="background:var(--s2);color:var(--t2);border-color:var(--bd2)" onclick="ins(')')">)</span>
+        </div>
+        <input type="text" id="cbf" class="fi"
+               placeholder="e.g.  deno_qty + marketing_qty - software_qty"
+               value="<?= htmlspecialchars($cb_formula) ?>">
+        <div class="fpv" id="fpv">
+            <?= $cb_formula?'Current: <strong>'.htmlspecialchars($cb_formula).'</strong>':'Click tokens or type your closing balance formula.' ?>
+        </div>
+        <div style="display:flex;gap:7px;margin-top:9px">
+            <a id="sfBtn" href="#" class="btn bp bsm">💾 Save Formula</a>
+            <button onclick="document.getElementById('cbf').value='';upPv()" class="btn bo bsm">✕ Clear</button>
+        </div>
+    </div>
+
+    <div class="ab">
+        <button onclick="expCmpCSV()" class="btn bi bsm">📥 Export CSV</button>
+        <button onclick="window.print()" class="btn bw bsm">🖨️ Print</button>
+    </div>
+
+    <div class="card">
+        <div class="ch">
+            <div class="ci" style="background:var(--acl)">⚖️</div>
+            <div class="ct">Qty · Price×Total · % Variance · Closing Balance</div>
+        </div>
+        <div class="tw" id="cmpWrap"></div>
+    </div>
+</div>
+
+<!-- ══ ANALYSIS ══ -->
+<div class="tp" id="tab-analysis">
+    <div class="card">
+        <div class="ch"><div class="ci" style="background:var(--acl)">📈</div><div class="ct">Qty per Module</div></div>
+        <div style="padding:18px"><canvas id="aC" height="80"></canvas></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="card">
+            <div class="ch"><div class="ct">Top Discrepancies vs Deno</div></div>
+            <div class="tw"><table class="rt">
+                <thead><tr><th>Book</th><th>Module</th><th>Deno</th><th>Qty</th><th>Diff</th></tr></thead>
+                <tbody>
+                <?php
+                $disc=[];
+                foreach($recon_data as $r) foreach($modules as $m){
+                    $d=(int)(($r[$m['slug'].'_qty']??0)-(int)$r['deno_qty']);
+                    if($d!==0) $disc[]=['n'=>$r['book_name'],'m'=>$m['label'],'c'=>$m['color'],'dq'=>$r['deno_qty'],'q'=>$r[$m['slug'].'_qty']??0,'d'=>$d];
+                }
+                usort($disc,fn($a,$b)=>abs($b['d'])<=>abs($a['d']));
+                foreach(array_slice($disc,0,12) as $dr): ?>
+                <tr>
+                    <td style="font-weight:500"><?= htmlspecialchars(mb_strimwidth($dr['n'],0,24,'…')) ?></td>
+                    <td><span style="color:<?= htmlspecialchars($dr['c']) ?>;font-weight:600;font-size:12px"><?= htmlspecialchars($dr['m']) ?></span></td>
+                    <td class="mono"><?= number_format((int)$dr['dq']) ?></td>
+                    <td class="mono"><?= number_format((int)$dr['q']) ?></td>
+                    <td class="<?= $dr['d']>0?'vp':'vn' ?>"><?= ($dr['d']>0?'+':'').number_format($dr['d']) ?></td>
+                </tr>
+                <?php endforeach;
+                if(empty($disc)): ?><tr><td colspan="5" style="text-align:center;color:var(--ok);padding:16px;font-weight:600">✓ All modules match!</td></tr><?php endif; ?>
+                </tbody>
+            </table></div>
+        </div>
+        <div class="card">
+            <div class="ch"><div class="ct">Module Coverage vs Deno</div></div>
+            <div style="padding:14px">
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:11px;padding-bottom:10px;border-bottom:1px solid var(--bd)">
+                    <div style="width:10px;height:10px;border-radius:50%;background:var(--ac);flex-shrink:0"></div>
+                    <div style="flex:1;font-size:13px;font-weight:500">Deno (Baseline)</div>
+                    <div class="mono" style="font-weight:700"><?= number_format($totals['deno']) ?></div>
+                </div>
+                <?php foreach($modules as $m): ?>
+                <div style="display:flex;align-items:center;gap:10px;margin-bottom:9px">
+                    <div style="width:10px;height:10px;border-radius:50%;background:<?= htmlspecialchars($m['color']) ?>;flex-shrink:0"></div>
+                    <div style="flex:1;font-size:13px"><?= htmlspecialchars($m['label']) ?></div>
+                    <div class="mono" style="font-weight:700"><?= number_format($totals[$m['slug']]) ?></div>
+                    <?php if($totals['deno']>0): ?>
+                    <div style="font-size:11px;color:var(--mu);font-family:var(--mo);min-width:38px;text-align:right"><?= round($totals[$m['slug']]/$totals['deno']*100,1) ?>%</div>
+                    <?php endif; ?>
+                </div>
+                <?php endforeach; ?>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ══ MODULE MANAGER ══ -->
+<div class="tp" id="tab-manage">
+    <div class="mmgr">
+        <h4>➕ Add New Module</h4>
+        <form method="post" style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+            <input type="hidden" name="action" value="add_module">
+            <div class="fg"><div class="fl">Slug (a-z_0-9)</div>
+                <input type="text" name="new_slug" class="fc" placeholder="e.g. physical_stock" pattern="[a-z0-9_]+" required></div>
+            <div class="fg"><div class="fl">Display Label</div>
+                <input type="text" name="new_label" class="fc" placeholder="e.g. Physical Stock" required></div>
+            <div class="fg"><div class="fl">Color</div>
+                <input type="color" name="new_color" class="fc" value="#3b82f6" style="min-width:60px;padding:4px"></div>
+            <div class="fg"><div class="fl">Icon (emoji)</div>
+                <input type="text" name="new_icon" class="fc" placeholder="📦" maxlength="4" style="min-width:70px"></div>
+            <button type="submit" class="btn bp">➕ Create Module + Table</button>
+        </form>
+    </div>
+    <div class="card">
+        <div class="ch"><div class="ci" style="background:var(--acl)">⚙️</div><div class="ct">Active Modules</div></div>
+        <div class="tw"><table class="rt">
+            <thead><tr><th>Slug</th><th>Label</th><th>DB Table</th><th>Color</th><th>Icon</th><th>Type</th><th>Rows (sel FY)</th><th>Action</th></tr></thead>
+            <tbody>
+            <tr>
+                <td class="mono" style="color:var(--ac)">deno</td>
+                <td style="font-weight:600">Deno (from deno table)</td>
+                <td class="mono" style="font-size:11px">public.deno</td>
+                <td><div style="width:18px;height:18px;border-radius:3px;background:var(--ac)"></div></td>
+                <td>📘</td><td><span class="pill po">Built-in</span></td>
+                <td class="mono"><?= number_format($books_count) ?></td>
+                <td><span style="color:var(--mu);font-size:11px">Read-only</span></td>
+            </tr>
+            <?php foreach($modules as $m): $bi=in_array($m['slug'],array_column($built_in,0)); ?>
+            <tr>
+                <td class="mono" style="color:<?= htmlspecialchars($m['color']) ?>"><?= htmlspecialchars($m['slug']) ?></td>
+                <td style="font-weight:600"><?= htmlspecialchars($m['label']) ?></td>
+                <td class="mono" style="font-size:11px"><?= htmlspecialchars($m['tbl']) ?></td>
+                <td><div style="width:18px;height:18px;border-radius:3px;background:<?= htmlspecialchars($m['color']) ?>"></div></td>
+                <td><?= $m['icon'] ?></td>
+                <td><?= $bi?'<span class="pill po">Built-in</span>':'<span class="pill pw2">Custom</span>' ?></td>
+                <td class="mono"><?= number_format($trunc_counts[$m['slug']]??0) ?></td>
+                <td>
+                    <?php if(!$bi): ?>
+                    <form method="post" style="display:inline" onsubmit="return confirm('Hide this module?')">
+                        <input type="hidden" name="action" value="delete_module">
+                        <input type="hidden" name="del_slug" value="<?= htmlspecialchars($m['slug']) ?>">
+                        <button type="submit" class="btn bd bxs">Hide</button>
+                    </form>
+                    <?php else: ?><span style="color:var(--mu);font-size:11px">Protected</span><?php endif; ?>
+                </td>
+            </tr>
+            <?php endforeach; ?>
+            </tbody>
+        </table></div>
+    </div>
+</div>
+
+</div><!-- /pw -->
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4/dist/chart.umd.min.js"></script>
+<script>
+/* ── Data from PHP ── */
+const RD = <?= json_encode(array_map(function($r) use ($modules) {
+    $row=['code'=>$r['book_code'],'name'=>$r['book_name'],'fy'=>$r['fy_code'],
+          'cls'=>(int)($r['class_level']??0),'tr'=>(bool)$r['is_translated'],
+          'deno_qty'=>(int)$r['deno_qty']];
+    foreach($modules as $m){
+        $row[$m['slug'].'_price']=(float)($r[$m['slug'].'_price']??0);
+        $row[$m['slug'].'_qty']=(int)($r[$m['slug'].'_qty']??0);
+    }
+    return $row;
+},$recon_data),JSON_UNESCAPED_UNICODE) ?>;
+
+const MODS = {
+    deno:{label:'Deno',color:'#2563eb',pkey:null,qkey:'deno_qty'},
+    <?php foreach($modules as $m): ?>
+    <?= json_encode($m['slug']) ?>:{label:<?= json_encode($m['label']) ?>,color:<?= json_encode($m['color']) ?>,
+        pkey:<?= json_encode($m['slug'].'_price') ?>,qkey:<?= json_encode($m['slug'].'_qty') ?>},
+    <?php endforeach; ?>
+};
+
+/* Truncate counts per slug/FY — loaded via AJAX */
+const TRUNC_COUNTS = <?= json_encode($trunc_counts) ?>;
+
+/* ── Price fallback ── */
+function resP(r,slug){
+    if(slug==='deno') return 0;
+    let p=r[slug+'_price']||0; if(p>0) return p;
+    p=r['marketing_price']||0; if(p>0) return p;
+    for(const[s,m] of Object.entries(MODS)){if(s===slug||s==='deno') continue; p=r[m.pkey]||0; if(p>0) return p;}
+    return 0;
+}
+
+/* ── Tab switch ── */
+function switchTab(id,btn){
+    document.querySelectorAll('.tp').forEach(p=>p.classList.remove('active'));
+    document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+    document.getElementById('tab-'+id).classList.add('active'); btn.classList.add('active');
+    if(id==='analysis') buildChart();
+    if(id==='comparison') renderCmp();
+}
+
+/* ── Book dropdown ── */
+const bs=document.getElementById('bs'),bdo=document.getElementById('bdo'),bh=document.getElementById('bh');
+if(bs){
+    bs.addEventListener('focus',()=>{bdo.style.display='block';fb();});
+    bs.addEventListener('input',fb);
+    document.addEventListener('click',e=>{if(!e.target.closest('.bdd')) bdo.style.display='none';});
+    function fb(){const t=bs.value.toLowerCase();bdo.querySelectorAll('.bdi').forEach(o=>{o.style.display=o.textContent.toLowerCase().includes(t)?'block':'none';});bdo.style.display='block';}
+    bdo.querySelectorAll('.bdi').forEach(o=>o.addEventListener('click',()=>{bs.value=o.dataset.text;bh.value=o.dataset.code;bdo.style.display='none';}));
+}
+
+/* ── Sort overview/deno tables ── */
+function srt(tabId,col){
+    const tbl=document.querySelector('#tab-'+tabId+' table.rt tbody'); if(!tbl) return;
+    const rows=[...tbl.querySelectorAll('tr')];
+    const th=document.querySelector('#tab-'+tabId+' th[onclick*="\''+col+'\'"]');
+    const asc=th?!th.classList.contains('sa'):true;
+    document.querySelectorAll('#tab-'+tabId+' th').forEach(h=>h.classList.remove('sa','sd'));
+    if(th) th.classList.add(asc?'sa':'sd');
+    const map={book_code:0,book_name:1,class_level:2,fy_code:4,deno_qty:5};
+    const ci=map[col]??0;
+    rows.sort((a,b)=>{
+        const av=a.cells[ci]?.textContent.trim()||'',bv=b.cells[ci]?.textContent.trim()||'';
+        const an=parseFloat(av.replace(/,/g,'')),bn=parseFloat(bv.replace(/,/g,''));
+        if(!isNaN(an)&&!isNaN(bn)) return asc?an-bn:bn-an;
+        return asc?av.localeCompare(bv):bv.localeCompare(av);
+    });
+    rows.forEach(r=>tbl.appendChild(r));
+}
+
+/* ── Sort by data attributes ── */
+function srt2(tableId,col){
+    const tbl=document.querySelector('#'+tableId+' tbody'); if(!tbl) return;
+    const rows=[...tbl.querySelectorAll('tr')];
+    const th=document.querySelector('#'+tableId+' th[onclick*="\'"+col+"\'"]');
+    const asc=!tbl.dataset['asc_'+col];
+    tbl.dataset['asc_'+col]=asc?'1':'';
+    rows.sort((a,b)=>{
+        const av=a.dataset[col]||'',bv=b.dataset[col]||'';
+        const an=parseFloat(av),bn=parseFloat(bv);
+        if(!isNaN(an)&&!isNaN(bn)) return asc?an-bn:bn-an;
+        return asc?av.localeCompare(bv):bv.localeCompare(av);
+    });
+    rows.forEach(r=>tbl.appendChild(r));
+}
+
+/* ── Module row sort ── */
+function sortMod(slug,col){
+    const tb=document.getElementById('tbody-'+slug); if(!tb) return;
+    const rows=[...tb.querySelectorAll('tr')];
+    const asc=tb.dataset.sc!==col||tb.dataset.sd==='desc';
+    tb.dataset.sc=col; tb.dataset.sd=asc?'asc':'desc';
+    rows.sort((a,b)=>{
+        const av=a.dataset[col]||'',bv=b.dataset[col]||'';
+        const an=parseFloat(av),bn=parseFloat(bv);
+        if(!isNaN(an)&&!isNaN(bn)) return asc?an-bn:bn-an;
+        return asc?av.localeCompare(bv):bv.localeCompare(av);
+    });
+    rows.forEach(r=>tb.appendChild(r));
+}
+
+/* ── Calc row total ── */
+function calcRow(slug,idx){
+    const pr=document.getElementById(`pr-${slug}-${idx}`);
+    const qt=document.getElementById(`qt-${slug}-${idx}`);
+    const tot=document.getElementById(`tot-${slug}-${idx}`);
+    if(!pr||!qt||!tot) return;
+    tot.textContent=(parseFloat(pr.value||0)*parseInt(qt.value||0)).toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+/* ── Clear module ── */
+function clearMod(slug){
+    if(!confirm(`Clear all ${slug} entries?`)) return;
+    document.querySelectorAll(`#form-${slug} input[type="number"]`).forEach(i=>i.value='0');
+    document.querySelectorAll(`#form-${slug} input[type="text"]`).forEach(i=>i.value='');
+    document.querySelectorAll(`[id^="tot-${slug}-"]`).forEach(el=>el.textContent='0.00');
+}
+
+/* ── Auto-fill price ── */
+function autofill(slug){
+    RD.forEach((r,i)=>{
+        const el=document.getElementById(`pr-${slug}-${i}`);
+        if(el&&parseFloat(el.value||0)===0){const p=resP(r,slug);if(p>0){el.value=p.toFixed(2);calcRow(slug,i);}}
+    });
+}
+
+/* ── Reload module when FY changes (redirects page with new FY) ── */
+function reloadModuleFY(slug, fy){
+    const url=new URL(window.location.href);
+    url.searchParams.set('fiscal_year',fy);
+    window.location.href=url.toString()+'#tab-btn-'+slug;
+}
+
+/* ── Truncate confirm ── */
+function confirmTrunc(label, form){
+    const fy=form.querySelector('[name="trunc_fy"]').value;
+    const cnt=form.querySelector('[id^="tc-"]')?.textContent?.trim()||'?';
+    return confirm(`⚠️ Delete ALL ${cnt} rows from "${label}" for FY ${fy}?\n\nThis cannot be undone.`);
+}
+
+/* ── Update truncate count display (AJAX) ── */
+function updateTruncCount(slug){
+    const sel=document.getElementById('trunc-fy-'+slug);
+    const disp=document.getElementById('tc-'+slug);
+    if(!sel||!disp) return;
+    const fy=sel.value;
+    fetch(`?ajax=trunc_count&slug=${encodeURIComponent(slug)}&fy=${encodeURIComponent(fy)}`)
+        .then(r=>r.json()).then(d=>{ disp.textContent=(d.count||0)+' rows'; })
+        .catch(()=>{ disp.textContent='? rows'; });
+}
+
+/* ── CSV template ── */
+function dlTpl(slug){
+    const fy=<?= json_encode($sel_fy) ?>;
+    const rows=RD.map(r=>[r.code,'"'+r.name.replace(/"/g,'""')+'"',r.fy,resP(r,slug).toFixed(2),(r[MODS[slug]?.qkey]||0),''].join(','));
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob(['book_code,book_name,fiscal_year,price,qty,notes\n'+rows.join('\n')],{type:'text/csv'}));
+    a.download=`template_${slug}_${fy}.csv`; a.click();
+}
+
+/* ── Formula ── */
+const cbf=document.getElementById('cbf');
+function ins(t){if(!cbf)return;const p=cbf.selectionStart,v=cbf.value;cbf.value=v.slice(0,p)+' '+t+' '+v.slice(p);cbf.focus();upPv();}
+function upPv(){
+    const f=cbf?.value?.trim()||'';
+    document.getElementById('fpv').innerHTML=f?'Formula: <strong>'+f+'</strong>':'Click tokens or type your closing balance formula.';
+    const u=new URL(window.location.href);u.searchParams.set('save_formula','1');u.searchParams.set('cb_formula',f);
+    const b=document.getElementById('sfBtn');if(b)b.href=u.toString();
+}
+if(cbf){cbf.addEventListener('input',upPv);upPv();}
+
+function evalF(formula,row){
+    if(!formula) return null;
+    let e=formula.toLowerCase();
+    for(const[s,m] of Object.entries(MODS)){
+        if(s==='deno') continue;
+        const q=row[m.qkey]||0;
+        e=e.replace(new RegExp('\\b'+s+'_qty\\b','g'),q);
+        e=e.replace(new RegExp('\\b'+s+'(?!_)\\b','g'),q);
+    }
+    e=e.replace(/\bdeno_qty\b/g,row.deno_qty||0).replace(/\bdeno\b/g,row.deno_qty||0);
+    if(!/^[\d\s\+\-\*\/\(\)\.]+$/.test(e)) return null;
+    try{return Function('"use strict";return ('+e+')')();}catch(ex){return null;}
+}
+
+function syncC(cb){cb.closest('.cck').classList.toggle('on',cb.checked);}
+
+/* ── Comparison table ── */
+function renderCmp(){
+    const sel=[...document.querySelectorAll('#cmpChecks input:checked')].map(c=>c.value);
+    const wrap=document.getElementById('cmpWrap');
+    if(sel.length<2){wrap.innerHTML='<div style="padding:24px;color:var(--mu);text-align:center;font-size:13px">Select at least 2 modules.</div>';return;}
+    const base=sel.includes('deno')?'deno':sel[0];
+    const bM=MODS[base];
+    const formula=cbf?.value?.trim()||'';
+
+    let h1=`<tr><th rowspan="2" onclick="srtCmp('sn')">SN</th>
+        <th rowspan="2" onclick="srtCmp('code')">Code</th>
+        <th rowspan="2" onclick="srtCmp('name')">Book Name</th>
+        <th rowspan="2" onclick="srtCmp('cls')">Class</th>
+        <th rowspan="2">Trans</th>
+        <th rowspan="2" onclick="srtCmp('fy')">FY</th>`;
+    let h2='<tr>';
+    sel.forEach(m=>{
+        const md=MODS[m],isDeno=m==='deno';
+        h1+=`<th colspan="${isDeno?1:4}" style="text-align:center;color:${md.color};background:color-mix(in srgb,${md.color} 6%,white)">${md.label}</th>`;
+        h2+=`<th style="color:${md.color}" onclick="srtCmp('${m}_qty')">Qty</th>`;
+        if(!isDeno){h2+=`<th style="color:${md.color}">Price</th><th style="color:${md.color}">Total</th><th onclick="srtCmp('${m}_var')">Var vs ${bM.label}</th>`;}
+    });
+    if(formula) h1+=`<th rowspan="2" style="background:var(--wal);color:var(--wa)" onclick="srtCmp('cb')">Closing Bal</th>`;
+    h1+=`<th rowspan="2">Status</th></tr>`; h2+=`</tr>`;
+
+    let rows='';
+    RD.forEach((r,i)=>{
+        const bQ=r[bM.qkey]||0;
+        const ok=sel.filter(m=>m!==base).every(m=>(r[MODS[m].qkey]||0)===bQ);
+        const pill=ok?'<span class="pill po">✓</span>':'<span class="pill pb">⚠</span>';
+        let cells=''; const vm={};
+        sel.forEach(m=>{
+            const md=MODS[m],isDeno=m==='deno';
+            const qty=r[md.qkey]||0,price=md.pkey?resP(r,m):0,total=price*qty;
+            const diff=qty-bQ,pct=bQ?(diff/bQ*100).toFixed(1)+'%':'—';
+            const cls=diff>0?'vp':diff<0?'vn':'vz',sign=diff>=0?'+':'';
+            vm[m+'_var']=diff;
+            cells+=`<td class="mono" style="color:${md.color};font-weight:600">${qty.toLocaleString()}</td>`;
+            if(!isDeno){cells+=`<td class="mono" style="font-size:12px">${price.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                <td class="mono" style="font-size:12px">${total.toLocaleString(undefined,{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                <td class="${cls}">${sign}${diff.toLocaleString()} (${pct})</td>`;}
+        });
+        const cb=formula?evalF(formula,r):null;
+        const cbCell=formula?`<td class="cbc">${cb!==null?parseFloat(cb.toFixed(2)).toLocaleString():'—'}</td>`:'';
+        rows+=`<tr data-sn="${i+1}" data-code="${r.code}" data-name="${r.name}" data-cls="${r.cls}" data-fy="${r.fy}" ${Object.entries(vm).map(([k,v])=>`data-${k}="${v}"`).join(' ')}>
+            <td class="mono" style="font-size:12px">${i+1}</td>
+            <td class="mono" style="color:var(--ac);font-size:12px">${r.code}</td>
+            <td style="font-weight:500;white-space:nowrap">${r.name}</td>
+            <td>${r.cls?`<span class="btg btg-c">${r.cls}</span>`:''}</td>
+            <td>${r.tr?'<span class="btg btg-t">T</span>':''}</td>
+            <td class="mono" style="font-size:11px">${r.fy}</td>
+            ${cells}${cbCell}<td>${pill}</td></tr>`;
+    });
+    wrap.innerHTML=`<table class="rt" id="cmpT"><thead>${h1}${h2}</thead><tbody>${rows||'<tr><td colspan="20" style="padding:28px;text-align:center;color:var(--mu)">No data.</td></tr>'}</tbody></table>`;
+}
+
+function srtCmp(col){
+    const tb=document.querySelector('#cmpT tbody'); if(!tb) return;
+    const rows=[...tb.querySelectorAll('tr')];
+    const asc=!tb.dataset['a_'+col]; tb.dataset['a_'+col]=asc?'1':'';
+    rows.sort((a,b)=>{
+        const av=a.dataset[col]||'',bv=b.dataset[col]||'';
+        const an=parseFloat(av),bn=parseFloat(bv);
+        if(!isNaN(an)&&!isNaN(bn)) return asc?an-bn:bn-an;
+        return asc?av.localeCompare(bv):bv.localeCompare(av);
+    });
+    rows.forEach(r=>tb.appendChild(r));
+}
+
+function expCmpCSV(){
+    const sel=[...document.querySelectorAll('#cmpChecks input:checked')].map(c=>c.value);
+    const base=sel.includes('deno')?'deno':sel[0];
+    const formula=cbf?.value?.trim()||'';
+    const headers=['SN','Code','Book Name','Class','FY'];
+    sel.forEach(m=>{const l=MODS[m].label;headers.push(l+' Qty');if(m!=='deno') headers.push(l+' Price',l+' Total','Var vs '+MODS[base].label);});
+    if(formula) headers.push('Closing Balance');
+    const lines=[headers.join(',')];
+    RD.forEach((r,i)=>{
+        const row=[i+1,r.code,'"'+r.name.replace(/"/g,'""')+'"',r.cls,r.fy];
+        sel.forEach(m=>{const md=MODS[m];const qty=r[md.qkey]||0;const price=md.pkey?resP(r,m):0;row.push(qty);if(m!=='deno') row.push(price.toFixed(2),(price*qty).toFixed(2),(qty-(r[MODS[base].qkey]||0)));});
+        if(formula){const cb=evalF(formula,r);row.push(cb!==null?parseFloat(cb.toFixed(2)):'');}
+        lines.push(row.join(','));
+    });
+    const a=document.createElement('a');
+    a.href=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv'}));
+    a.download='comparison_<?= htmlspecialchars($sel_fy) ?>_'+new Date().toISOString().split('T')[0]+'.csv'; a.click();
+}
+
+/* ── Chart ── */
+let chart=null;
+function buildChart(){
+    if(chart) chart.destroy();
+    chart=new Chart(document.getElementById('aC'),{
+        type:'bar',
+        data:{
+            labels:RD.map(r=>r.name.length>16?r.name.slice(0,16)+'…':r.name),
+            datasets:[
+                {label:'Deno',data:RD.map(r=>r.deno_qty),backgroundColor:'rgba(37,99,235,.7)'},
+                <?php foreach($modules as $m): ?>
+                {label:<?= json_encode($m['label']) ?>,data:RD.map(r=>r[<?= json_encode($m['slug'].'_qty') ?>]||0),backgroundColor:<?= json_encode($m['color']) ?>+'b3'},
+                <?php endforeach; ?>
+            ]
+        },
+        options:{responsive:true,
+            plugins:{legend:{labels:{color:'#475569',font:{family:'Inter'}}},tooltip:{mode:'index',intersect:false}},
+            scales:{x:{ticks:{color:'#94a3b8',maxRotation:45,font:{size:10}},grid:{color:'rgba(0,0,0,.04)'}},
+                    y:{ticks:{color:'#94a3b8'},grid:{color:'rgba(0,0,0,.04)'}}}}
+    });
+}
+
+document.addEventListener('DOMContentLoaded',()=>{ renderCmp(); });
+</script>
+</body></html>
+<?php require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/footer.php'; ?>
