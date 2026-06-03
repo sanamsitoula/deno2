@@ -1,0 +1,27 @@
+# Dependencies
+/vendor/
+
+# Application logs (auto-created by Logger class)
+/logs/*/
+
+# Environment & secrets
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# PHP uploads (large binary files)
+/uploads/*.pdf
+/uploads/ctp_pdfs/
+/uploads/forma_pdfs/
+/uploads/prc/
+
+# Compiled assets
+/assets/dist/

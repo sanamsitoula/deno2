@@ -29,7 +29,7 @@
 //
 // We resolve it here, once, so every require_once below just works.
 // ============================================================
-file_put_contents('C:/xampp/htdocs/deno2/attendance_device/logs/zkteco/startup_test.log',
+file_put_contents(__DIR__ . '/logs/zkteco/startup_test.log',
     date('Y-m-d H:i:s') . " | SAPI=" . php_sapi_name()
     . " | DOC_ROOT=" . ($_SERVER['DOCUMENT_ROOT'] ?? 'EMPTY')
     . " | ARGS=" . implode(' ', $argv ?? [])
@@ -71,7 +71,7 @@ foreach ($required_files as $file) {
         $error_msg = "FATAL: Required file not found: $file\n"
                    . "DOCUMENT_ROOT: " . ($_SERVER['DOCUMENT_ROOT'] ?? 'NOT SET') . "\n"
                    . "Expected path: $file\n";
-        file_put_contents('C:/xampp/htdocs/deno2/attendance_device/logs/zkteco/permission_error.log',
+        file_put_contents(__DIR__ . '/logs/zkteco/permission_error.log',
             date('Y-m-d H:i:s') . " | " . $error_msg . "\n",
             FILE_APPEND
         );

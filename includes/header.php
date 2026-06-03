@@ -1,11 +1,6 @@
 <?php
 $base_url = '/deno2';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/config.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
-if (session_status() === PHP_SESSION_NONE) {
-    session_start();
-}
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/bootstrap.php';
 
 function getUrl($path=''){
     global $base_url;
@@ -112,26 +107,6 @@ $current_page = basename($_SERVER['PHP_SELF']);
     </div>
 </li>
 
-<!-- VEHICLES -->
-<li class="nav-item">
-    <a class="nav-link" data-bs-toggle="collapse" href="#mVehicles" role="button" aria-expanded="false">
-        <i class="bi bi-truck"></i> Vehicles <i class="bi bi-chevron-down ms-auto"></i>
-    </a>
-    <div class="collapse" id="mVehicles">
- <li><a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_index.php') ?>">Vehicle List</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_assignments.php') ?>">Assignments</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/driver_index.php') ?>">Drivers</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/fuel_price_history.php') ?>">Fuel Prices</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_maintenance.php') ?>">Maintenance</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/monthly_summary.php') ?>">Monthly Summary</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_reports_nepali.php') ?>">Nepali Reports</a></li>
-             <li>   <a class="dropdown-item" href="<?= getUrl('vehicle/fuel_coupons_v2.php') ?>">Fuel Coupons</a></li>
-
-               <li>  <a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_daily_log_v2.php') ?>">Daily Log</a></li>
-
-    </div>
-</li>
-
 <!-- REPORTS -->
 <li class="nav-item">
     <a class="nav-link" data-bs-toggle="collapse" href="#mReports" role="button" aria-expanded="false">
@@ -217,26 +192,25 @@ $current_page = basename($_SERVER['PHP_SELF']);
 </li>
 
 
+<?php if (can_access_module('hr')): ?>
 <li class="nav-item dropdown">
     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown" aria-expanded="false">
-        <i class="bi bi-truck"></i> HR
+        <i class="bi bi-people"></i> HR
     </a>
     <ul class="dropdown-menu">
         <li><a class="dropdown-item" href="<?= getUrl('hr/employee/index.php') ?>">Employee List</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_assignments.php') ?>">Assignments</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/driver_index.php') ?>">Drivers</a></li>
-      
-  
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/fuel_price_history.php') ?>">Fuel Prices</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_maintenance.php') ?>">Maintenance</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/monthly_summary.php') ?>">Monthly Summary</a></li>
-        <li><a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_reports_nepali.php') ?>">Nepali Reports</a></li>
-              <a class="dropdown-item" href="<?= getUrl('vehicle/fuel_coupons_v2.php') ?>">Fuel Coupons</a>
-
-                    <a class="dropdown-item" href="<?= getUrl('vehicle/vehicle_daily_log_v2.php') ?>">Daily Log</a>
-                     
+        <li><a class="dropdown-item" href="<?= getUrl('hr/employee/create_enhanced.php') ?>">Add Employee</a></li>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="<?= getUrl('hr/employee/department/index.php') ?>">Departments</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('hr/modules/attendance/mark.php') ?>">Mark Attendance</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('hr/modules/leaves/apply.php') ?>">Leave Applications</a></li>
+        <?php if (can_access_module('payroll')): ?>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="<?= getUrl('hr/modules/payroll/process.php') ?>">Payroll</a></li>
+        <?php endif; ?>
     </ul>
 </li>
+<?php endif; ?>
 
 
 <li class="nav-item dropdown">
