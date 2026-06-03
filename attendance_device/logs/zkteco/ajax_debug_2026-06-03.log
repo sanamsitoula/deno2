@@ -1,0 +1,2 @@
+[13:35:55] REQUEST: {"action":"","device_id":null,"date":null,"schedule":"morning","php_sapi":"apache2handler","php_bin":"C:\\xampp\\apache\\bin\\httpd.exe"}
+[13:35:55] ERROR: Unknown action: ''
