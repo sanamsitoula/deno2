@@ -200,8 +200,15 @@ foreach ($employees as $emp) {
         <div class="card-body py-2">
             <form method="GET" class="row g-2 align-items-end">
                 <div class="col-md-2">
-                    <label class="form-label small mb-1">Date</label>
-                    <input type="date" name="date" class="form-control form-control-sm"
+                    <label class="form-label small mb-1">मिति (BS)</label>
+                    <input type="text" class="form-control form-control-sm bs-date"
+                           id="att_date_nep" data-ad-pair="att_date_ad"
+                           placeholder="YYYY.MM.DD">
+                    <span class="bs-date-label"></span>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small mb-1">Date (AD)</label>
+                    <input type="date" name="date" id="att_date_ad" class="form-control form-control-sm ad-date"
                            value="<?= $attendance_date ?>" max="<?= date('Y-m-d') ?>">
                 </div>
                 <div class="col-md-3">

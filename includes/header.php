@@ -18,6 +18,41 @@ $current_page = basename($_SERVER['PHP_SELF']);
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
     <link rel="stylesheet" href="/jemc/assets/css/jpms.css">
+    <!-- Nepali Date Picker (Sajanmaharjan v5) -->
+    <link href="https://nepalidatepicker.sajanmaharjan.com.np/v5/nepali.datepicker/css/nepali.datepicker.v5.0.6.min.css"
+          rel="stylesheet" type="text/css"/>
+    <style>
+    /* ── Nepali datepicker global overrides ── */
+    .bs-date, .ndp-input {
+        background:#fff url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' fill='%236c5ce7' viewBox='0 0 16 16'%3E%3Cpath d='M3.5 0a.5.5 0 0 1 .5.5V1h8V.5a.5.5 0 0 1 1 0V1h1a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V3a2 2 0 0 1 2-2h1V.5a.5.5 0 0 1 .5-.5zM2 2a1 1 0 0 0-1 1v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V3a1 1 0 0 0-1-1H2z'/%3E%3C/svg%3E") no-repeat right 10px center;
+        background-size: 14px;
+        padding-right: 32px !important;
+        cursor: pointer;
+    }
+    .bs-date:focus, .ndp-input:focus {
+        border-color: #6c5ce7;
+        box-shadow: 0 0 0 2px rgba(108,92,231,.2);
+        outline: none;
+    }
+    .dual-date { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+    .dual-date .bs-date, .dual-date .ad-date { flex:1; min-width:130px; }
+    .bs-date-label {
+        display: inline-block;
+        font-size: .72rem;
+        color: #6c5ce7;
+        font-weight: 600;
+        margin-top: 2px;
+    }
+    .ad-date-label {
+        display: inline-block;
+        font-size: .72rem;
+        color: #0984e3;
+        font-weight: 600;
+        margin-top: 2px;
+    }
+    /* Calendar popup z-index */
+    .nepali-date-picker { z-index: 9999 !important; }
+    </style>
 </head>
 <body>
 
@@ -184,7 +219,15 @@ $current_page = basename($_SERVER['PHP_SELF']);
 </div>
 </nav>
 
+<!-- jQuery (required by Sajanmaharjan picker) -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<!-- Nepali Date Picker JS -->
+<script src="https://nepalidatepicker.sajanmaharjan.com.np/v5/nepali.datepicker/js/nepali.datepicker.v5.0.6.min.js"
+        type="text/javascript"></script>
+<!-- Our BS↔AD converter -->
 <script src="/jemc/assets/js/nepal-date.js"></script>
+<!-- Global BS Date Picker initializer -->
+<script src="/jemc/assets/js/bs-datepicker-global.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const openBtn = document.getElementById('openMobileMenu');

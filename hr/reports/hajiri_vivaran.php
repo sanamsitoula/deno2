@@ -352,21 +352,33 @@ body{background:#f0f2f8;font-family:'Segoe UI',sans-serif}
 <div class="bg-white rounded-3 shadow-sm p-3 mb-3 no-print">
     <form method="GET" class="row g-2 align-items-end">
         <input type="hidden" name="view" value="<?= $viewMode ?>">
+        <!-- BS Year/Month (using Nepali calendar picker) -->
         <div class="col-md-2">
             <label class="form-label small fw-semibold mb-1">BS वर्ष</label>
-            <select name="bs_year" class="form-select form-select-sm">
-                <?php for($y=2082;$y>=2079;$y--): ?>
+            <select name="bs_year" class="form-select form-select-sm" id="sel_bs_year">
+                <?php for($y=2083;$y>=2079;$y--): ?>
                 <option value="<?= $y ?>" <?= $y==$selYear?'selected':'' ?>><?= $y ?></option>
                 <?php endfor; ?>
             </select>
         </div>
         <div class="col-md-2">
             <label class="form-label small fw-semibold mb-1">BS महिना</label>
-            <select name="bs_month" class="form-select form-select-sm">
+            <select name="bs_month" class="form-select form-select-sm" id="sel_bs_month">
                 <?php foreach($bsMonths as $n=>$nm): ?>
-                <option value="<?= $n ?>" <?= $n==$selMonth?'selected':'' ?>><?= $nm ?> (<?= $bsMonthsEn[$n] ?>)</option>
+                <option value="<?= $n ?>" <?= $n==$selMonth?'selected':'' ?>>
+                    <?= $nm ?> (<?= $bsMonthsEn[$n] ?>)
+                </option>
                 <?php endforeach; ?>
             </select>
+        </div>
+        <!-- Quick BS date picker shortcut -->
+        <div class="col-md-2">
+            <label class="form-label small fw-semibold mb-1">वा BS मिति छान्नुस्</label>
+            <input type="text" class="form-control form-control-sm bs-date"
+                   id="quickBsPicker"
+                   placeholder="<?= $selYear ?>.<?= sprintf('%02d',$selMonth) ?>.01"
+                   title="BS date pick गर्नुस् — year+month auto-fills above">
+            <small class="text-muted" style="font-size:.65rem">मिति छान्दा माथि auto-fill हुन्छ</small>
         </div>
         <div class="col-md-2">
             <label class="form-label small fw-semibold mb-1">कर्मचारी प्रकार</label>
@@ -641,6 +653,27 @@ body{background:#f0f2f8;font-family:'Segoe UI',sans-serif}
 
 </div>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+// Sync quick BS date picker → year + month selects → auto-submit
+document.addEventListener('DOMContentLoaded', function() {
+    var picker = document.getElementById('quickBsPicker');
+    if (!picker) return;
+    picker.addEventListener('change', function() {
+        var val = this.value.replace(/[-/]/g, '.');
+        var parts = val.split('.');
+        if (parts.length < 2) return;
+        var yr = parseInt(parts[0], 10);
+        var mo = parseInt(parts[1], 10);
+        if (!yr || !mo) return;
+        var yrSel = document.getElementById('sel_bs_year');
+        var moSel = document.getElementById('sel_bs_month');
+        if (yrSel) yrSel.value = yr;
+        if (moSel) moSel.value = mo;
+        // Auto-submit the filter form
+        this.closest('form').submit();
+    });
+});
+</script>
 </body>
 </html>
 <?php ob_end_flush(); ?>

@@ -723,13 +723,14 @@ body{background:#f0f2f8}
             <div class="row g-2 mb-3">
                 <div class="col-6">
                     <label class="form-label fw-semibold">BS Date (YYYY.MM.DD) <span class="text-danger">*</span></label>
-                    <input type="text" name="holiday_date_nep" id="hNep" class="form-control bs-date" placeholder="2082.01.01" required>
-                    <small class="text-muted">Nepali calendar</small>
+                    <input type="text" name="holiday_date_nep" id="hNep" class="form-control bs-date"
+                           placeholder="2082.01.01" data-ad-pair="hEng" required>
+                    <small class="bs-date-label"></small>
                 </div>
                 <div class="col-6">
-                    <label class="form-label fw-semibold">AD Date <span class="text-danger">*</span></label>
-                    <input type="date" name="holiday_date_eng" id="hEng" class="form-control ad-date" required>
-                    <small class="text-muted">Auto-converts from BS</small>
+                    <label class="form-label fw-semibold">AD Date</label>
+                    <input type="date" name="holiday_date_eng" id="hEng" class="form-control ad-date" data-bs-pair="hNep" required>
+                    <small class="text-muted">Auto-filled from BS date ↑</small>
                 </div>
             </div>
             <div class="row g-2 mb-3">

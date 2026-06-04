@@ -748,10 +748,11 @@ body{background:#f0f2f8}
                             <option value="<?= $g ?>" <?= $e['gender']===$g?'selected':'' ?>><?= $g ?></option>
                             <?php endforeach; ?>
                         </select></div>
-                    <div class="col-md-3"><label class="form-label fw-semibold small">DOB (AD)</label>
-                        <input type="date" name="dob" class="form-control form-control-sm" value="<?= $e['dob']??'' ?>"></div>
-                    <div class="col-md-3"><label class="form-label fw-semibold small">DOB (BS)</label>
-                        <input type="text" name="dob_nep" class="form-control form-control-sm" value="<?= htmlspecialchars($e['dob_nep']??'') ?>" placeholder="YYYY.MM.DD"></div>
+                    <div class="col-md-3"><label class="form-label fw-semibold small">DOB (BS) <small class="text-muted">— BS calendar</small></label>
+                        <input type="text" name="dob_nep" id="dob_nep" class="form-control form-control-sm bs-date" data-ad-pair="dob_ad" value="<?= htmlspecialchars($e['dob_nep']??'') ?>" placeholder="YYYY.MM.DD">
+                        <span class="bs-date-label"></span></div>
+                    <div class="col-md-3"><label class="form-label fw-semibold small">DOB (AD) <small class="text-muted">— auto-fills</small></label>
+                        <input type="date" name="dob" id="dob_ad" class="form-control form-control-sm" value="<?= $e['dob']??'' ?>"></div>
                     <div class="col-md-3"><label class="form-label fw-semibold small">Mobile</label>
                         <input type="text" name="mobile_number" class="form-control form-control-sm" value="<?= htmlspecialchars($e['mobile_number']??'') ?>"></div>
                     <div class="col-md-4"><label class="form-label fw-semibold small">Email</label>
@@ -827,18 +828,21 @@ body{background:#f0f2f8}
                             <label class="form-check-label fw-semibold" for="isSSF" style="font-size:.8rem">SSF Enrolled</label>
                         </div>
                     </div>
-                    <div class="col-md-3"><label class="form-label fw-semibold small">Join Date (AD)</label>
-                        <input type="date" name="join_date" class="form-control form-control-sm" value="<?= $e['join_date']??'' ?>"></div>
                     <div class="col-md-3"><label class="form-label fw-semibold small">Join Date (BS)</label>
-                        <input type="text" name="join_date_nep" class="form-control form-control-sm" value="<?= htmlspecialchars($e['join_date_nep']??'') ?>" placeholder="YYYY.MM.DD"></div>
-                    <div class="col-md-3"><label class="form-label fw-semibold small">Initial Appt. (AD)</label>
-                        <input type="date" name="initial_appointment_date" class="form-control form-control-sm" value="<?= $e['initial_appointment_date']??'' ?>"></div>
+                        <input type="text" name="join_date_nep" class="form-control form-control-sm bs-date" data-ad-pair="join_date_ad" value="<?= htmlspecialchars($e['join_date_nep']??'') ?>" placeholder="YYYY.MM.DD">
+                        <span class="bs-date-label"></span></div>
+                    <div class="col-md-3"><label class="form-label fw-semibold small">Join Date (AD) <small class="text-muted">auto</small></label>
+                        <input type="date" name="join_date" id="join_date_ad" class="form-control form-control-sm" value="<?= $e['join_date']??'' ?>"></div>
                     <div class="col-md-3"><label class="form-label fw-semibold small">Initial Appt. (BS)</label>
-                        <input type="text" name="initial_appointment_date_nep" class="form-control form-control-sm" value="<?= htmlspecialchars($e['initial_appointment_date_nep']??'') ?>" placeholder="YYYY.MM.DD"></div>
-                    <div class="col-md-3"><label class="form-label fw-semibold small">Retirement Date (AD)</label>
-                        <input type="date" name="retirement_date" class="form-control form-control-sm" value="<?= $e['retirement_date']??'' ?>"></div>
+                        <input type="text" name="initial_appointment_date_nep" class="form-control form-control-sm bs-date" data-ad-pair="initial_appt_ad" value="<?= htmlspecialchars($e['initial_appointment_date_nep']??'') ?>" placeholder="YYYY.MM.DD">
+                        <span class="bs-date-label"></span></div>
+                    <div class="col-md-3"><label class="form-label fw-semibold small">Initial Appt. (AD) <small class="text-muted">auto</small></label>
+                        <input type="date" name="initial_appointment_date" id="initial_appt_ad" class="form-control form-control-sm" value="<?= $e['initial_appointment_date']??'' ?>"></div>
                     <div class="col-md-3"><label class="form-label fw-semibold small">Retirement Date (BS)</label>
-                        <input type="text" name="retirement_date_nep" class="form-control form-control-sm" value="<?= htmlspecialchars($e['retirement_date_nep']??'') ?>" placeholder="YYYY.MM.DD"></div>
+                        <input type="text" name="retirement_date_nep" class="form-control form-control-sm bs-date" data-ad-pair="retirement_ad" value="<?= htmlspecialchars($e['retirement_date_nep']??'') ?>" placeholder="YYYY.MM.DD">
+                        <span class="bs-date-label"></span></div>
+                    <div class="col-md-3"><label class="form-label fw-semibold small">Retirement Date (AD) <small class="text-muted">auto</small></label>
+                        <input type="date" name="retirement_date" id="retirement_ad" class="form-control form-control-sm" value="<?= $e['retirement_date']??'' ?>"></div>
                     <div class="col-md-3"><label class="form-label fw-semibold small">Taxpayer Type</label>
                         <select name="taxpayer_type" class="form-select form-select-sm">
                             <option value="SINGLE" <?= ($e['taxpayer_type']??'')!=='COUPLE'?'selected':'' ?>>Single</option>
