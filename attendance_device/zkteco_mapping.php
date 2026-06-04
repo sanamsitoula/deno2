@@ -492,9 +492,14 @@ body{background:#f0f2f8;font-size:.84rem}
 <!-- ══ ORPHAN ZKTeco USERS ═══════════════════════════════════ -->
 <?php elseif($activeTab === 'orphans'): ?>
 <div class="bg-white rounded-3 shadow-sm">
-    <div class="px-3 py-2 border-bottom">
-        <h6 class="mb-0 fw-bold"><i class="fas fa-user-slash me-1 text-warning"></i><?= count($zkOrphans) ?> ZKTeco users not linked to any JEMC employee</h6>
-        <small class="text-muted">These people punch in at the device but have no JEMC employee record</small>
+    <div class="px-3 py-2 border-bottom d-flex justify-content-between align-items-start flex-wrap gap-2">
+        <div>
+            <h6 class="mb-0 fw-bold"><i class="fas fa-user-slash me-1 text-warning"></i><?= count($zkOrphans) ?> ZKTeco users not linked to any JEMC employee</h6>
+            <small class="text-muted">These people punch at the device but have no JEMC employee record. Click <strong>Map to JEMC</strong> to link.</small>
+        </div>
+        <input type="text" id="searchOrphan" class="form-control form-control-sm" style="width:220px"
+               placeholder="Search by name or ID..."
+               oninput="filterOrphans(this.value)">
     </div>
     <div class="table-responsive">
     <table class="table table-sm table-hover mb-0" style="font-size:.8rem">
@@ -503,25 +508,19 @@ body{background:#f0f2f8;font-size:.84rem}
         </thead>
         <tbody>
         <?php $i=1; foreach($zkOrphans as $zk): ?>
-        <tr class="orphan-row">
+        <tr class="orphan-row orphan-search-row">
             <td><?= $i++ ?></td>
-            <td><code><?= htmlspecialchars($zk['user_id']) ?></code></td>
+            <td><code style="font-size:.72rem"><?= htmlspecialchars($zk['user_id']) ?></code></td>
             <td><strong><?= htmlspecialchars($zk['name'] ?? '(no name)') ?></strong></td>
             <td class="text-center"><?= $zk['device_count'] ?></td>
             <td><small><?= $zk['last_seen'] ? date('d M Y H:i', strtotime($zk['last_seen'])) : '—' ?></small></td>
             <td class="text-center"><?= number_format($zk['punch_count']) ?></td>
             <td>
-                <form method="POST" class="d-flex gap-1">
-                    <input type="hidden" name="action" value="map">
-                    <input type="hidden" name="zk_user_id" value="<?= htmlspecialchars($zk['user_id']) ?>">
-                    <select name="emp_id" class="form-select form-select-sm" style="max-width:200px" required>
-                        <option value="">Select JEMC Employee</option>
-                        <?php foreach($jemcAll as $je): ?>
-                        <option value="<?= $je['id'] ?>"><?= htmlspecialchars($je['code'].' — '.$je['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <button type="submit" class="btn btn-success btn-sm"><i class="fas fa-link"></i></button>
-                </form>
+                <!-- One button per row — opens shared modal (no heavy per-row dropdown) -->
+                <button type="button" class="btn btn-sm btn-success"
+                        onclick="openOrphanModal('<?= htmlspecialchars(addslashes($zk['user_id'])) ?>', '<?= htmlspecialchars(addslashes($zk['name'] ?? '')) ?>')">
+                    <i class="fas fa-link me-1"></i>Map to JEMC
+                </button>
             </td>
         </tr>
         <?php endforeach; ?>
@@ -576,6 +575,89 @@ body{background:#f0f2f8;font-size:.84rem}
 <?php endif; ?>
 
 </div><!-- /container -->
+
+<!-- ══ ORPHAN MAP MODAL (single shared modal for all orphan rows) ══════════ -->
+<div class="modal fade" id="orphanMapModal" tabindex="-1">
+<div class="modal-dialog modal-lg">
+<div class="modal-content">
+    <div class="modal-header bg-success text-white">
+        <h5 class="modal-title">
+            <i class="fas fa-link me-2"></i>Link ZKTeco User to JEMC Employee
+        </h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <form method="POST" id="orphanMapForm">
+        <input type="hidden" name="action" value="map">
+        <input type="hidden" name="zk_user_id" id="orphanZkId">
+        <input type="hidden" name="emp_id" id="orphanEmpId">
+        <div class="modal-body">
+            <!-- ZKTeco user info -->
+            <div class="alert alert-info py-2 mb-3">
+                <strong>ZKTeco User:</strong>
+                ID: <code id="orphanZkIdDisplay"></code> —
+                <strong id="orphanZkNameDisplay"></strong>
+            </div>
+
+            <!-- Employee search -->
+            <div class="mb-2">
+                <label class="form-label fw-semibold">Search JEMC Employee</label>
+                <input type="text" id="orphanEmpSearch" class="form-control"
+                       placeholder="Type name or employee code..."
+                       oninput="filterOrphanEmployees(this.value)" autofocus>
+            </div>
+
+            <!-- Employee list -->
+            <div style="max-height:350px;overflow-y:auto;border:1px solid #dee2e6;border-radius:6px">
+                <table class="table table-sm table-hover mb-0" style="font-size:.8rem">
+                    <thead class="table-light sticky-top">
+                        <tr>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Designation</th>
+                            <th>Dept</th>
+                            <th>Type</th>
+                            <th>Select</th>
+                        </tr>
+                    </thead>
+                    <tbody id="orphanEmpList">
+                    <?php foreach($jemcAll as $je): ?>
+                    <tr class="orphan-emp-row"
+                        data-search="<?= strtolower($je['code'].' '.$je['name'].' '.($je['designation']??'').' '.($je['dept']??'')) ?>">
+                        <td><code style="font-size:.7rem"><?= htmlspecialchars($je['code']) ?></code></td>
+                        <td><strong><?= htmlspecialchars($je['name']) ?></strong></td>
+                        <td><small><?= htmlspecialchars($je['designation'] ?? '') ?></small></td>
+                        <td><small class="text-muted"><?= htmlspecialchars($je['dept'] ?? '') ?></small></td>
+                        <td><span class="badge bg-secondary" style="font-size:.6rem"><?= $je['emp_type'] ?></span></td>
+                        <td>
+                            <button type="button" class="btn btn-xs btn-primary"
+                                    style="font-size:.7rem;padding:2px 10px"
+                                    onclick="selectOrphanEmp(<?= $je['id'] ?>, '<?= htmlspecialchars(addslashes($je['name'])) ?>')">
+                                <i class="fas fa-check me-1"></i>Select
+                            </button>
+                        </td>
+                    </tr>
+                    <?php endforeach; ?>
+                    </tbody>
+                </table>
+            </div>
+
+            <!-- Selected employee confirmation -->
+            <div id="orphanSelectedInfo" class="alert alert-success py-2 mt-2" style="display:none">
+                <i class="fas fa-check-circle me-1"></i>
+                Selected: <strong id="orphanSelectedName"></strong>
+                — click <strong>Save Mapping</strong> to confirm.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" id="orphanSaveBtn" class="btn btn-success" disabled>
+                <i class="fas fa-link me-1"></i>Save Mapping
+            </button>
+        </div>
+    </form>
+</div>
+</div>
+</div>
 
 <!-- ZKTeco Search Modal (for manual mapping) -->
 <div class="modal fade" id="zkSearchModal" tabindex="-1">
@@ -676,6 +758,47 @@ body{background:#f0f2f8;font-size:.84rem}
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 let currentEmpId = null;
+
+// ── Orphan tab: open single shared modal ──────────────────────
+function openOrphanModal(zkUserId, zkName) {
+    document.getElementById('orphanZkId').value         = zkUserId;
+    document.getElementById('orphanZkIdDisplay').textContent = zkUserId;
+    document.getElementById('orphanZkNameDisplay').textContent = zkName;
+    document.getElementById('orphanEmpSearch').value    = '';
+    document.getElementById('orphanEmpId').value        = '';
+    document.getElementById('orphanSaveBtn').disabled   = true;
+    document.getElementById('orphanSelectedInfo').style.display = 'none';
+    filterOrphanEmployees('');
+    // Pre-fill search with ZK name to show similar employees
+    setTimeout(() => {
+        document.getElementById('orphanEmpSearch').value = zkName;
+        filterOrphanEmployees(zkName);
+    }, 100);
+    new bootstrap.Modal(document.getElementById('orphanMapModal')).show();
+    setTimeout(() => document.getElementById('orphanEmpSearch').focus(), 400);
+}
+
+function filterOrphanEmployees(q) {
+    const lq = q.toLowerCase().replace(/\s+/g,' ').trim();
+    document.querySelectorAll('.orphan-emp-row').forEach(row => {
+        row.style.display = !lq || row.dataset.search.includes(lq) ? '' : 'none';
+    });
+}
+
+function selectOrphanEmp(empId, empName) {
+    document.getElementById('orphanEmpId').value = empId;
+    document.getElementById('orphanSelectedName').textContent = empName;
+    document.getElementById('orphanSelectedInfo').style.display = 'block';
+    document.getElementById('orphanSaveBtn').disabled = false;
+}
+
+// ── Orphan tab: filter table rows ────────────────────────────
+function filterOrphans(q) {
+    const lq = q.toLowerCase();
+    document.querySelectorAll('.orphan-search-row').forEach(row => {
+        row.style.display = !lq || row.textContent.toLowerCase().includes(lq) ? '' : 'none';
+    });
+}
 
 // Select a suggestion from the unmapped list
 function selectMapping(empId, zkUserId, zkName) {
