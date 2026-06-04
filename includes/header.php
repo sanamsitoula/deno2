@@ -152,6 +152,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
         <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/modules/payroll/process.php') ?>"><i class="bi bi-cash-stack me-1"></i>Payroll</a></li>
         <?php endif; ?>
+        <li><hr class="dropdown-divider"></li>
+        <li><a class="dropdown-item" href="<?= getUrl('hr/setup/index.php') ?>"><i class="bi bi-gear-fill me-1"></i>Payroll Setup</a></li>
     </ul>
 </li>
 <?php endif; ?>
