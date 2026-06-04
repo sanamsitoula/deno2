@@ -106,12 +106,16 @@ if ($zk_conn) {
     // attendance_logs table: user_id, timestamp, punch_count — join for stats
     $zkRaw = $zk_conn->query("
         SELECT e.user_id,
-               MAX(e.name)              AS name,
+               MAX(e.name)                 AS name,
                COUNT(DISTINCT e.device_id) AS device_count,
-               MAX(al.timestamp)        AS last_seen,
-               COUNT(al.id)             AS punch_count
+               MAX(al.timestamp)           AS last_seen,
+               COUNT(al.id)               AS punch_count,
+               -- Device list: 'atn3 (10.10.10.12), Attn1 (10.10.10.18)'
+               STRING_AGG(DISTINCT d.name || ' (' || d.ip_address || ')', ', ' ORDER BY d.name || ' (' || d.ip_address || ')') AS device_list,
+               STRING_AGG(DISTINCT d.id::text, ',') AS device_ids
         FROM employees e
         LEFT JOIN attendance_logs al ON al.user_id = e.user_id
+        LEFT JOIN devices d ON e.device_id = d.id
         WHERE e.name IS NOT NULL
         GROUP BY e.user_id
         ORDER BY MAX(e.name)
@@ -504,22 +508,89 @@ body{background:#f0f2f8;font-size:.84rem}
     <div class="table-responsive">
     <table class="table table-sm table-hover mb-0" style="font-size:.8rem">
         <thead class="table-light">
-            <tr><th>#</th><th>ZKTeco User ID</th><th>Name in Device</th><th>Devices</th><th>Last Punch</th><th>Total Punches</th><th>Map to JEMC</th></tr>
+            <tr>
+                <th>#</th>
+                <th>ZKTeco User ID</th>
+                <th>Name in Device</th>
+                <th>Device(s)</th>
+                <th>Last Punch</th>
+                <th>Punches</th>
+                <th>Best JEMC Match</th>
+                <th>Map to JEMC</th>
+            </tr>
         </thead>
         <tbody>
-        <?php $i=1; foreach($zkOrphans as $zk): ?>
+        <?php
+        // Build fuzzy suggestions for orphans (top-1 per orphan)
+        $jemcNorm = [];
+        foreach ($jemcAll as $je) {
+            $jemcNorm[] = ['id'=>$je['id'],'code'=>$je['code'],'name'=>$je['name'],
+                           'desig'=>$je['designation']??'','dept'=>$je['dept']??'',
+                           'norm'=>normName($je['name'])];
+        }
+
+        $i=1; foreach($zkOrphans as $zk):
+            $zkName = $zk['name'] ?? '';
+            $normZk = normName($zkName);
+
+            // Top-1 JEMC fuzzy match
+            $topMatch = null; $topScore = 0;
+            if (!empty($normZk) && !is_numeric(str_replace(' ','',$normZk))) {
+                foreach ($jemcNorm as $je) {
+                    $score = 0;
+                    similar_text($normZk, $je['norm'], $score);
+                    if ($score > $topScore) { $topScore = (int)round($score); $topMatch = $je; }
+                }
+            }
+        ?>
         <tr class="orphan-row orphan-search-row">
             <td><?= $i++ ?></td>
-            <td><code style="font-size:.72rem"><?= htmlspecialchars($zk['user_id']) ?></code></td>
-            <td><strong><?= htmlspecialchars($zk['name'] ?? '(no name)') ?></strong></td>
-            <td class="text-center"><?= $zk['device_count'] ?></td>
-            <td><small><?= $zk['last_seen'] ? date('d M Y H:i', strtotime($zk['last_seen'])) : '—' ?></small></td>
+            <td><code style="font-size:.72rem;color:#d63031"><?= htmlspecialchars($zk['user_id']) ?></code></td>
+            <td>
+                <strong><?= htmlspecialchars($zkName ?: '(no name)') ?></strong>
+            </td>
+            <td>
+                <?php if (!empty($zk['device_list'])): ?>
+                <?php foreach(explode(', ', $zk['device_list']) as $dev): ?>
+                <span class="badge bg-light text-dark border" style="font-size:.62rem;display:block;margin-bottom:1px">
+                    <i class="fas fa-server" style="color:#6c5ce7"></i>
+                    <?= htmlspecialchars($dev) ?>
+                </span>
+                <?php endforeach; ?>
+                <?php else: ?>
+                <span class="text-muted">—</span>
+                <?php endif; ?>
+            </td>
+            <td><small class="text-muted"><?= $zk['last_seen'] ? date('d M Y H:i', strtotime($zk['last_seen'])) : '—' ?></small></td>
             <td class="text-center"><?= number_format($zk['punch_count']) ?></td>
             <td>
-                <!-- One button per row — opens shared modal (no heavy per-row dropdown) -->
+                <?php if ($topMatch && $topScore >= 60): ?>
+                <div style="font-size:.75rem">
+                    <code style="font-size:.68rem;color:#2c3e8c"><?= htmlspecialchars($topMatch['code']) ?></code>
+                    <strong> <?= htmlspecialchars($topMatch['name']) ?></strong><br>
+                    <small class="text-muted"><?= htmlspecialchars($topMatch['desig']) ?></small>
+                    <span class="<?= $topScore>=85?'score-high':($topScore>=70?'score-med':'score-low') ?> ms-1">
+                        <?= $topScore ?>%
+                    </span>
+                    <div class="score-bar" style="width:80px;margin-top:2px">
+                        <div class="score-bar-fill" style="width:<?= $topScore ?>%;background:<?= $topScore>=85?'#1a9e5f':($topScore>=70?'#e8a020':'#d63031') ?>"></div>
+                    </div>
+                    <button type="button" class="btn btn-xs btn-outline-success mt-1"
+                            style="font-size:.65rem;padding:1px 6px"
+                            onclick="quickOrphanMap('<?= htmlspecialchars(addslashes($zk['user_id'])) ?>', <?= $topMatch['id'] ?>, '<?= htmlspecialchars(addslashes($topMatch['name'])) ?>')">
+                        <i class="fas fa-bolt me-1"></i>Quick Map
+                    </button>
+                </div>
+                <?php elseif (!empty($zkName)): ?>
+                <small class="text-muted"><i class="fas fa-question-circle me-1"></i>No close match</small>
+                <?php else: ?>
+                <small class="text-muted">—</small>
+                <?php endif; ?>
+            </td>
+            <td>
                 <button type="button" class="btn btn-sm btn-success"
-                        onclick="openOrphanModal('<?= htmlspecialchars(addslashes($zk['user_id'])) ?>', '<?= htmlspecialchars(addslashes($zk['name'] ?? '')) ?>')">
-                    <i class="fas fa-link me-1"></i>Map to JEMC
+                        onclick="openOrphanModal('<?= htmlspecialchars(addslashes($zk['user_id'])) ?>', '<?= htmlspecialchars(addslashes($zkName)) ?>')">
+                    <i class="fas fa-link me-1"></i>Map
                 </button>
             </td>
         </tr>
@@ -755,6 +826,12 @@ body{background:#f0f2f8;font-size:.84rem}
 </div>
 </div>
 
+<!-- Hidden quick-map form -->
+<form id="quickMapForm" method="POST" style="display:none">
+    <input type="hidden" name="action" value="map">
+    <input type="hidden" name="zk_user_id">
+    <input type="hidden" name="emp_id">
+</form>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 <script>
 let currentEmpId = null;
@@ -790,6 +867,15 @@ function selectOrphanEmp(empId, empName) {
     document.getElementById('orphanSelectedName').textContent = empName;
     document.getElementById('orphanSelectedInfo').style.display = 'block';
     document.getElementById('orphanSaveBtn').disabled = false;
+}
+
+// ── Quick-map from suggestion (no modal needed) ───────────────
+function quickOrphanMap(zkUserId, empId, empName) {
+    if (!confirm('Map ZKTeco ID ' + zkUserId + ' → ' + empName + '?')) return;
+    const f = document.getElementById('quickMapForm');
+    f.querySelector('[name=zk_user_id]').value = zkUserId;
+    f.querySelector('[name=emp_id]').value      = empId;
+    f.submit();
 }
 
 // ── Orphan tab: filter table rows ────────────────────────────
