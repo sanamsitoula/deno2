@@ -29,10 +29,69 @@ function runDeviceCmd(string $cmd): array {
     return $result ?? ['success' => false, 'error' => 'No response: '.$json];
 }
 
+// ── POST: Add/Edit Device ─────────────────────────────────────
+if (($_POST['action'] ?? '') === 'save_device' && $zk_conn) {
+    try {
+        $devId   = (int)($_POST['device_id_edit'] ?? 0);
+        $devData = [
+            ':name'    => trim($_POST['device_name']),
+            ':ip'      => trim($_POST['ip_address']),
+            ':port'    => (int)($_POST['port'] ?? 4370),
+            ':pass'    => trim($_POST['password'] ?? ''),
+            ':model'   => trim($_POST['model'] ?? ''),
+            ':active'  => isset($_POST['is_active']) ? 'true' : 'false',
+        ];
+        if ($devId) {
+            $zk_conn->prepare("UPDATE devices SET name=:name,ip_address=:ip,port=:port,password=:pass,model=:model,is_active=:active WHERE id=:id")
+                    ->execute(array_merge($devData,[':id'=>$devId]));
+            $msg = "Device updated: {$devData[':name']}";
+        } else {
+            $zk_conn->prepare("INSERT INTO devices (name,ip_address,port,password,model,is_active,created_at) VALUES (:name,:ip,:port,:pass,:model,:active,NOW())")
+                    ->execute($devData);
+            $msg = "Device added: {$devData[':name']}";
+        }
+        // Update devices.json for ZKTecePuller
+        $allDevices = $zk_conn->query("SELECT name,ip_address AS ip,port,password,model,is_active FROM devices WHERE is_active=true ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+        $jsonData = array_map(fn($d) => [
+            'name'=>$d['name'],'ip'=>$d['ip'],'port'=>(int)$d['port'],
+            'password'=>$d['password']??'','model'=>$d['model']??'',
+            'is_active'=>(bool)$d['is_active'],'connection_timeout'=>10
+        ], $allDevices);
+        file_put_contents('D:/claude_project/ZKTecePuller/devices.json', json_encode($jsonData, JSON_PRETTY_PRINT));
+        $msg .= ' — devices.json updated.';
+    } catch(Exception $e) { $err = $e->getMessage(); }
+}
+
+// ── POST: Delete Device ───────────────────────────────────────
+if (($_POST['action'] ?? '') === 'delete_device' && $zk_conn) {
+    $delId = (int)$_POST['device_id_del'];
+    try {
+        $zk_conn->prepare("DELETE FROM devices WHERE id=:id")->execute([':id'=>$delId]);
+        // Rebuild devices.json
+        $allDevices = $zk_conn->query("SELECT name,ip_address AS ip,port,password,model,is_active FROM devices WHERE is_active=true ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+        $jsonData = array_map(fn($d) => ['name'=>$d['name'],'ip'=>$d['ip'],'port'=>(int)$d['port'],'password'=>$d['password']??'','model'=>$d['model']??'','is_active'=>(bool)$d['is_active'],'connection_timeout'=>10], $allDevices);
+        file_put_contents('D:/claude_project/ZKTecePuller/devices.json', json_encode($jsonData, JSON_PRETTY_PRINT));
+        $msg = "Device deleted and devices.json updated.";
+        $selectedDeviceId = 0;
+    } catch(Exception $e) { $err = $e->getMessage(); }
+}
+
+// ── POST: Test device connection ──────────────────────────────
+if (($_POST['action'] ?? '') === 'test_device') {
+    $testIp   = trim($_POST['test_ip']);
+    $testPort = (int)($_POST['test_port'] ?? 4370);
+    $result = runDeviceCmd("list_users --device_ip ".escapeshellarg($testIp)." --port ".escapeshellarg($testPort)." --timeout 5");
+    if ($result['success']) {
+        $msg = "✓ Connected to $testIp:$testPort — {$result['count']} users enrolled.";
+    } else {
+        $err = "✗ Cannot connect to $testIp:$testPort — " . ($result['error'] ?? 'Timeout');
+    }
+}
+
 // ── Devices from ZKTeco DB ────────────────────────────────────
 $devices = [];
 if ($zk_conn) {
-    $devices = $zk_conn->query("SELECT * FROM devices ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
+    $devices = $zk_conn->query("SELECT d.*,COUNT(e.id) AS user_count FROM devices d LEFT JOIN employees e ON e.device_id=d.id GROUP BY d.id ORDER BY d.id")->fetchAll(PDO::FETCH_ASSOC);
 }
 
 $selectedDeviceId = (int)($_GET['device_id'] ?? ($devices[0]['id'] ?? 0));
@@ -277,13 +336,62 @@ body{background:#f0f2f8;font-size:.83rem}
 <!-- Device Selector -->
 <div class="col-md-2">
     <div class="bg-white rounded-3 shadow-sm p-3 mb-3">
-        <h6 class="fw-bold mb-2"><i class="bi bi-hdd-network me-1"></i>Devices</h6>
+        <div class="d-flex justify-content-between align-items-center mb-2">
+            <h6 class="fw-bold mb-0"><i class="bi bi-hdd-network me-1"></i>Devices</h6>
+            <button class="btn btn-xs btn-primary" style="font-size:.68rem;padding:2px 8px"
+                    onclick="openDeviceModal()">
+                <i class="fas fa-plus"></i> Add
+            </button>
+        </div>
         <?php foreach($devices as $d): ?>
-        <a href="?device_id=<?= $d['id'] ?>" class="d-block text-decoration-none device-tab <?= $d['id']==$selectedDeviceId?'active':'' ?>">
-            <div class="fw-semibold" style="font-size:.82rem"><?= htmlspecialchars($d['name']) ?></div>
-            <small style="color:#8492a6"><?= $d['ip_address'].':'.$d['port'] ?></small>
-        </a>
+        <div class="device-tab <?= $d['id']==$selectedDeviceId?'active':'' ?> mb-1">
+            <div class="d-flex justify-content-between align-items-start">
+                <a href="?device_id=<?= $d['id'] ?>" class="text-decoration-none flex-grow-1" style="color:inherit">
+                    <div class="d-flex align-items-center gap-1">
+                        <span style="width:7px;height:7px;border-radius:50%;background:<?= $d['is_active']?'#1a9e5f':'#d63031' ?>;flex-shrink:0"></span>
+                        <strong style="font-size:.82rem"><?= htmlspecialchars($d['name']) ?></strong>
+                    </div>
+                    <small style="color:<?= $d['id']==$selectedDeviceId?'#adc8ff':'#8492a6' ?>;margin-left:12px;display:block">
+                        <?= $d['ip_address'] ?>:<?= $d['port'] ?>
+                    </small>
+                    <small style="color:<?= $d['id']==$selectedDeviceId?'#adc8ff':'#8492a6' ?>;margin-left:12px;display:block">
+                        <?= number_format($d['user_count']) ?> users · <?= htmlspecialchars($d['model'] ?? 'Unknown') ?>
+                    </small>
+                </a>
+                <div class="d-flex flex-column gap-1 ms-1">
+                    <button class="btn btn-xs btn-outline-<?= $d['id']==$selectedDeviceId?'light':'secondary' ?>"
+                            style="font-size:.6rem;padding:1px 5px"
+                            onclick='openDeviceModal(<?= json_encode($d) ?>)'>
+                        <i class="fas fa-edit"></i>
+                    </button>
+                    <form method="POST" style="margin:0" onsubmit="return confirm('Delete device <?= htmlspecialchars(addslashes($d['name'])) ?>?')">
+                        <input type="hidden" name="action" value="delete_device">
+                        <input type="hidden" name="device_id_del" value="<?= $d['id'] ?>">
+                        <button type="submit" class="btn btn-xs btn-outline-<?= $d['id']==$selectedDeviceId?'light':'danger' ?>"
+                                style="font-size:.6rem;padding:1px 5px">
+                            <i class="fas fa-trash"></i>
+                        </button>
+                    </form>
+                </div>
+            </div>
+        </div>
         <?php endforeach; ?>
+        <?php if(empty($devices)): ?>
+        <div class="text-center py-3 text-muted" style="font-size:.78rem">
+            No devices configured.<br>Click <strong>+ Add</strong> to add one.
+        </div>
+        <?php endif; ?>
+
+        <!-- Test Connection -->
+        <div class="mt-2 pt-2 border-top">
+            <div style="font-size:.72rem;font-weight:600;color:#636e72;margin-bottom:4px">Test Connection</div>
+            <form method="POST" class="d-flex gap-1">
+                <input type="hidden" name="action" value="test_device">
+                <input type="text" name="test_ip" class="form-control form-control-sm" placeholder="IP address" style="font-size:.72rem">
+                <input type="number" name="test_port" value="4370" class="form-control form-control-sm" style="width:70px;font-size:.72rem">
+                <button type="submit" class="btn btn-outline-primary btn-sm" style="font-size:.7rem;white-space:nowrap">Test</button>
+            </form>
+        </div>
     </div>
 
     <!-- Push employee to device -->
@@ -549,7 +657,77 @@ function openCreateEmp(zkUserId, zkName) {
     new bootstrap.Modal(document.getElementById('createEmpModal')).show();
     setTimeout(() => document.getElementById('createEmpName').select(), 400);
 }
+
+// ── Device modal ──────────────────────────────────────────────
+function openDeviceModal(d) {
+    const isEdit = !!d;
+    document.getElementById('deviceIdEdit').value = d?.id || 0;
+    document.getElementById('devName').value  = d?.name || '';
+    document.getElementById('devModel').value = d?.model || '';
+    document.getElementById('devIp').value    = d?.ip_address || '';
+    document.getElementById('devPort').value  = d?.port || 4370;
+    document.getElementById('devPass').value  = d?.password || '';
+    document.getElementById('devActive').checked = d ? (d.is_active === true || d.is_active === 't' || d.is_active === '1') : true;
+    document.getElementById('deviceModalTitle').innerHTML =
+        '<i class="bi bi-hdd-network me-2"></i>' + (isEdit ? 'Edit Device' : 'Add Device');
+    new bootstrap.Modal(document.getElementById('deviceModal')).show();
+}
 </script>
+
+<!-- Add/Edit Device Modal -->
+<div class="modal fade" id="deviceModal" tabindex="-1">
+<div class="modal-dialog">
+<div class="modal-content">
+    <div class="modal-header bg-primary text-white">
+        <h5 class="modal-title" id="deviceModalTitle"><i class="bi bi-hdd-network me-2"></i>Add Device</h5>
+        <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+    </div>
+    <form method="POST">
+        <input type="hidden" name="action" value="save_device">
+        <input type="hidden" name="device_id_edit" id="deviceIdEdit" value="0">
+        <div class="modal-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Device Name <span class="text-danger">*</span></label>
+                    <input type="text" name="device_name" id="devName" class="form-control" required placeholder="e.g. Main Entrance">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Model</label>
+                    <input type="text" name="model" id="devModel" class="form-control" placeholder="e.g. MB2000, iFace302">
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label fw-semibold">IP Address <span class="text-danger">*</span></label>
+                    <input type="text" name="ip_address" id="devIp" class="form-control" required placeholder="10.10.10.20">
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label fw-semibold">Port</label>
+                    <input type="number" name="port" id="devPort" class="form-control" value="4370" min="1" max="65535">
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label fw-semibold">Password</label>
+                    <input type="text" name="password" id="devPass" class="form-control" placeholder="Leave blank if none">
+                </div>
+                <div class="col-md-6 d-flex align-items-end pb-1">
+                    <div class="form-check">
+                        <input type="checkbox" name="is_active" id="devActive" class="form-check-input" checked>
+                        <label class="form-check-label fw-semibold" for="devActive">Active</label>
+                    </div>
+                </div>
+            </div>
+            <div class="alert alert-info py-2 small mt-2 mb-0">
+                <i class="fas fa-info-circle me-1"></i>
+                Saving updates <strong>devices.json</strong> for ZKTecePuller automatically.
+                Restart ZKTecePuller to apply.
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
+            <button type="submit" class="btn btn-primary"><i class="fas fa-save me-1"></i>Save Device</button>
+        </div>
+    </form>
+</div>
+</div>
+</div>
 </body>
 </html>
 <?php ob_end_flush(); ?>

@@ -140,6 +140,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
 <li class="nav-item dropdown">
     <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown"><i class="bi bi-people"></i> HR</a>
     <ul class="dropdown-menu">
+        <li><a class="dropdown-item fw-bold" href="<?= getUrl('hr/index.php') ?>" style="color:#2c3e8c"><i class="bi bi-grid-1x2 me-1"></i>HR Dashboard</a></li>
+        <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/employee/index.php') ?>"><i class="bi bi-people-fill me-1"></i>Employee List</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/employee/create_enhanced.php') ?>"><i class="bi bi-person-plus me-1"></i>Add Employee</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/employee/department/index.php') ?>"><i class="bi bi-diagram-3 me-1"></i>Departments</a></li>
