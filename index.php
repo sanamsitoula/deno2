@@ -17,6 +17,14 @@ $nepMonths = ['01'=>'Baisakh','02'=>'Jestha','03'=>'Ashad','04'=>'Shrawan',
               '09'=>'Poush','10'=>'Magh','11'=>'Falgun','12'=>'Chaitra'];
 $monthName = $nepMonths[$monthNum] ?? '';
 
+// ── BS Date ────────────────────────────────────────────────────
+use Administrator\Deno2\Shared\DateConverter;
+$bsToday   = DateConverter::todayBs();
+$bsParts   = explode('-', $bsToday);
+$bsMonthNp = ['1'=>'बैशाख','2'=>'जेठ','3'=>'असार','4'=>'साउन','5'=>'भाद्र','6'=>'असोज','7'=>'कार्तिक','8'=>'मंसिर','9'=>'पुष','10'=>'माघ','11'=>'फाल्गुण','12'=>'चैत'];
+$bsDayNp   = ['0'=>'आइतबार','1'=>'सोमबार','2'=>'मंगलबार','3'=>'बुधबार','4'=>'बिहिबार','5'=>'शुक्रबार','6'=>'शनिबार'];
+$bsDateFull = $bsDayNp[date('w')] . ', ' . (int)$bsParts[2] . ' ' . ($bsMonthNp[(string)(int)$bsParts[1]] ?? '') . ' ' . $bsParts[0];
+
 // ── PRODUCTION (Deno) ─────────────────────────────────────────
 $prodToday = $conn->prepare("
     SELECT COALESCE(SUM(total_qty),0) AS qty, COALESCE(SUM(quantity_openpcs),0) AS openpcs
@@ -240,7 +248,14 @@ body{background:#f0f2f8}
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
             <h4 class="mb-0 fw-bold"><i class="bi bi-grid-1x2-fill me-2"></i>JEMC Management Dashboard</h4>
-            <small style="opacity:.8"><?= date('l, d F Y') ?> &nbsp;·&nbsp; Fiscal Year: <strong><?= htmlspecialchars($fyCode) ?></strong></small>
+            <div class="d-flex gap-2 align-items-center flex-wrap mt-1" style="font-size:.82rem">
+                <span class="badge" style="background:#2c3e8c;font-size:.75rem;padding:4px 10px">
+                    <i class="bi bi-calendar3 me-1"></i><?= htmlspecialchars($bsDateFull) ?>
+                </span>
+                <span class="text-muted"><?= date('l, d F Y') ?></span>
+                <span class="text-muted">·</span>
+                <span class="text-muted">आ.व. <strong><?= htmlspecialchars($fyCode) ?></strong></span>
+            </div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
             <a href="/deno2/entries/deno.php" class="btn btn-sm btn-light fw-semibold"><i class="bi bi-plus-circle me-1"></i>Add Deno</a>

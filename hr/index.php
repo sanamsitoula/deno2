@@ -8,6 +8,16 @@ if (!has_role('admin') && !has_role('hr') && !has_role('finance')) {
     header('Location: /jemc/unauthorized.php'); exit();
 }
 
+// ── BS Date ───────────────────────────────────────────────────
+use Administrator\Deno2\Shared\DateConverter;
+$bsToday   = DateConverter::todayBs();               // '2083-02-17'
+$bsParts   = explode('-', $bsToday);
+$bsMonthNp = ['1'=>'बैशाख','2'=>'जेठ','3'=>'असार','4'=>'साउन','5'=>'भाद्र','6'=>'असोज','7'=>'कार्तिक','8'=>'मंसिर','9'=>'पुष','10'=>'माघ','11'=>'फाल्गुण','12'=>'चैत'];
+$bsDayNp   = ['0'=>'आइतबार','1'=>'सोमबार','2'=>'मंगलबार','3'=>'बुधबार','4'=>'बिहिबार','5'=>'शुक्रबार','6'=>'शनिबार'];
+$bsDateStr = (int)$bsParts[2] . ' ' . ($bsMonthNp[(string)(int)$bsParts[1]] ?? '') . ' ' . $bsParts[0]; // '17 जेठ 2083'
+$bsDayName = $bsDayNp[date('w')]; // 'बिहिबार'
+$adDateStr = date('l, d F Y');    // 'Thursday, 04 June 2026'
+
 // ── Stats ─────────────────────────────────────────────────────
 $empStats = $conn->query("
     SELECT
@@ -131,10 +141,16 @@ body{background:#f0f2f8}
     <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
         <div>
             <h3 class="mb-0 fw-bold"><i class="fas fa-users me-2"></i>HR Dashboard</h3>
-            <small style="opacity:.8">
-                Janak Education Materials Center · FY: <strong><?= htmlspecialchars($activeFY ?? 'N/A') ?></strong> ·
-                <?= date('l, d F Y') ?>
-            </small>
+            <div style="opacity:.85;font-size:.85rem;margin-top:3px">
+                जनक शिक्षा सामग्री केन्द्र · आ.व. <strong><?= htmlspecialchars($activeFY ?? 'N/A') ?></strong>
+            </div>
+            <div class="d-flex gap-3 mt-1 flex-wrap" style="font-size:.8rem;opacity:.8">
+                <span><i class="fas fa-calendar-alt me-1"></i>
+                    <strong><?= $bsDayName ?></strong>, <?= $bsDateStr ?>
+                    <span style="opacity:.6;margin:0 4px">|</span>
+                    <?= $adDateStr ?>
+                </span>
+            </div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
             <a href="/jemc/hr/employee/create_enhanced.php" class="btn btn-sm btn-light fw-semibold">
