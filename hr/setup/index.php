@@ -17,100 +17,108 @@ $fiscalYears   = $conn->query("SELECT id, fiscal_code, is_active FROM fiscal_yea
 $activeFY      = $conn->query("SELECT id, fiscal_code FROM fiscal_years WHERE is_active=true LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 $holidayTypes  = $conn->query("SELECT * FROM holiday_types ORDER BY id")->fetchAll(PDO::FETCH_ASSOC);
 
-// ══ POST HANDLERS ═════════════════════════════════════════════
+// ══ POST HANDLERS — use switch to avoid operator-precedence bug ════════════
+// BUG FIX: `$_POST['action'] ?? '' === 'x'` is parsed as
+//          `$_POST['action'] ?? ('' === 'x')` → always true!
+// Correct:  `($_POST['action'] ?? '') === 'x'`
+// Solution: single switch statement — only ONE block ever runs.
 
-// ── 1. Save Employee Salary ───────────────────────────────────
-if ($_POST['action'] ?? '' === 'save_salary') {
-    try {
-        $empId  = (int)$_POST['employee_id'];
-        $basic  = (float)$_POST['basic_salary'];
-        $mode   = $_POST['salary_mode'] ?? 'MONTHLY';
-        $from   = $_POST['effective_from'];
-        // Mark old as not current
-        $conn->prepare("UPDATE employee_salary SET is_current=false, effective_to=:d WHERE employee_id=:e AND is_current=true")
-             ->execute([':d'=>$from, ':e'=>$empId]);
-        // Insert new
-        $conn->prepare("INSERT INTO employee_salary (employee_id,basic_salary,salary_mode,effective_from,is_current,created_by,created_at)
-                        VALUES (:e,:b,:m,:f,true,:u,NOW())")
-             ->execute([':e'=>$empId,':b'=>$basic,':m'=>$mode,':f'=>$from,':u'=>$_SESSION['user_id']??0]);
-        // Also update SSF/taxpayer flags on employee
-        $conn->prepare("UPDATE employee SET is_ssf_enrolled=:ssf, taxpayer_type=:tt WHERE id=:e")
-             ->execute([':ssf'=>isset($_POST['is_ssf_enrolled'])?'true':'false',':tt'=>$_POST['taxpayer_type']??'SINGLE',':e'=>$empId]);
-        $msg = "Salary saved for employee.";
-    } catch(Exception $e) { $err = $e->getMessage(); }
-}
+$action = $_POST['action'] ?? '';
+switch ($action) {
 
-// ── 2. Save Holiday ───────────────────────────────────────────
-if ($_POST['action'] ?? '' === 'save_holiday') {
-    try {
-        $hId = (int)($_POST['holiday_id'] ?? 0);
-        if ($hId) {
-            $conn->prepare("UPDATE holidays SET holiday_name=:n, holiday_date_nep=:nep, holiday_date_eng=:eng,
-                holiday_type_id=:t, fiscal_year=:fy, is_active=:a, remarks=:r, updated_at=NOW()
-                WHERE id=:id")
-                ->execute([':n'=>$_POST['holiday_name'],':nep'=>$_POST['holiday_date_nep'],':eng'=>$_POST['holiday_date_eng'],
-                           ':t'=>$_POST['holiday_type_id'],':fy'=>$_POST['fiscal_year'],':a'=>isset($_POST['is_active'])? 'true':'false',
-                           ':r'=>$_POST['remarks']??'',':id'=>$hId]);
-            $msg = "Holiday updated.";
-        } else {
-            $conn->prepare("INSERT INTO holidays (holiday_name,holiday_date_nep,holiday_date_eng,holiday_type_id,fiscal_year,is_active,remarks,created_by,created_at,updated_at)
-                VALUES (:n,:nep,:eng,:t,:fy,:a,:r,:u,NOW(),NOW())")
-                ->execute([':n'=>$_POST['holiday_name'],':nep'=>$_POST['holiday_date_nep'],':eng'=>$_POST['holiday_date_eng'],
-                           ':t'=>$_POST['holiday_type_id'],':fy'=>$_POST['fiscal_year'],':a'=>isset($_POST['is_active'])? 'true':'false',
-                           ':r'=>$_POST['remarks']??'',':u'=>$_SESSION['user_id']??0]);
-            $msg = "Holiday added.";
-        }
-    } catch(Exception $e) { $err = $e->getMessage(); }
-}
+    case 'save_salary':
+        try {
+            $empId = (int)($_POST['employee_id'] ?? 0);
+            $basic = (float)($_POST['basic_salary'] ?? 0);
+            $mode  = $_POST['salary_mode'] ?? 'MONTHLY';
+            $from  = $_POST['effective_from'] ?? date('Y-m-d');
+            $conn->prepare("UPDATE employee_salary SET is_current=false,effective_to=:d WHERE employee_id=:e AND is_current=true")
+                 ->execute([':d'=>$from,':e'=>$empId]);
+            $conn->prepare("INSERT INTO employee_salary (employee_id,basic_salary,salary_mode,effective_from,is_current,created_by,created_at) VALUES (:e,:b,:m,:f,true,:u,NOW())")
+                 ->execute([':e'=>$empId,':b'=>$basic,':m'=>$mode,':f'=>$from,':u'=>$_SESSION['user_id']??0]);
+            $conn->prepare("UPDATE employee SET is_ssf_enrolled=:ssf,taxpayer_type=:tt WHERE id=:e")
+                 ->execute([':ssf'=>isset($_POST['is_ssf_enrolled'])?'true':'false',':tt'=>$_POST['taxpayer_type']??'SINGLE',':e'=>$empId]);
+            $msg = "Salary saved for employee.";
+        } catch(Exception $e) { $err = $e->getMessage(); }
+        break;
 
-// ── 3. Delete Holiday ─────────────────────────────────────────
-if (($_POST['action'] ?? '') === 'delete_holiday') {
-    $conn->prepare("DELETE FROM holidays WHERE id=:id")->execute([':id'=>(int)$_POST['holiday_id']]);
-    $msg = "Holiday deleted.";
-}
+    case 'save_holiday':
+        try {
+            $hId  = (int)($_POST['holiday_id'] ?? 0);
+            $hd   = [
+                ':n'   => $_POST['holiday_name']    ?? '',
+                ':nep' => $_POST['holiday_date_nep'] ?? '',
+                ':eng' => $_POST['holiday_date_eng'] ?? '',
+                ':t'   => $_POST['holiday_type_id']  ?? null,
+                ':fy'  => $_POST['fiscal_year']      ?? '',
+                ':a'   => isset($_POST['is_active']) ? 'true' : 'false',
+                ':r'   => $_POST['remarks']          ?? '',
+            ];
+            if ($hId) {
+                $conn->prepare("UPDATE holidays SET holiday_name=:n,holiday_date_nep=:nep,holiday_date_eng=:eng,holiday_type_id=:t,fiscal_year=:fy,is_active=:a,remarks=:r,updated_at=NOW() WHERE id=:id")
+                     ->execute(array_merge($hd,[':id'=>$hId]));
+                $msg = "Holiday updated.";
+            } else {
+                $conn->prepare("INSERT INTO holidays (holiday_name,holiday_date_nep,holiday_date_eng,holiday_type_id,fiscal_year,is_active,remarks,created_by,created_at,updated_at) VALUES (:n,:nep,:eng,:t,:fy,:a,:r,:u,NOW(),NOW())")
+                     ->execute(array_merge($hd,[':u'=>$_SESSION['user_id']??0]));
+                $msg = "Holiday added.";
+            }
+        } catch(Exception $e) { $err = $e->getMessage(); }
+        break;
 
-// ── 4. Save OT Rule ───────────────────────────────────────────
-if ($_POST['action'] ?? '' === 'save_ot_rule') {
-    try {
-        $rId = (int)($_POST['rule_id'] ?? 0);
-        if ($rId) {
-            $conn->prepare("UPDATE ot_rules SET rule_name=:n,day_type=:d,min_hours_for_ot=:min,ot_rate=:r,
-                max_ot_hours_per_day=:max,requires_approval=:a,is_active=:ia WHERE id=:id")
-                ->execute([':n'=>$_POST['rule_name'],':d'=>$_POST['day_type'],':min'=>$_POST['min_hours'],
-                           ':r'=>$_POST['ot_rate'],':max'=>$_POST['max_hours'],':a'=>isset($_POST['requires_approval'])?'true':'false',
-                           ':ia'=>isset($_POST['is_active'])?'true':'false',':id'=>$rId]);
-        } else {
-            $conn->prepare("INSERT INTO ot_rules (rule_name,day_type,min_hours_for_ot,ot_rate,max_ot_hours_per_day,requires_approval,is_active,effective_from)
-                VALUES (:n,:d,:min,:r,:max,:a,:ia,:ef)")
-                ->execute([':n'=>$_POST['rule_name'],':d'=>$_POST['day_type'],':min'=>$_POST['min_hours'],
-                           ':r'=>$_POST['ot_rate'],':max'=>$_POST['max_hours'],':a'=>isset($_POST['requires_approval'])?'true':'false',
-                           ':ia'=>isset($_POST['is_active'])?'true':'false',':ef'=>date('Y-m-d')]);
-        }
-        $msg = "OT Rule saved.";
-    } catch(Exception $e) { $err = $e->getMessage(); }
-}
+    case 'delete_holiday':
+        $conn->prepare("DELETE FROM holidays WHERE id=:id")->execute([':id'=>(int)($_POST['holiday_id']??0)]);
+        $msg = "Holiday deleted.";
+        break;
 
-// ── 5. Save Salary Component ──────────────────────────────────
-if ($_POST['action'] ?? '' === 'save_component') {
-    try {
-        $cId = (int)($_POST['component_id'] ?? 0);
-        if ($cId) {
-            $conn->prepare("UPDATE salary_components SET component_name=:n,component_type=:ct,
-                calculation_type=:calc,default_value=:val,is_taxable=:tx,is_active=:ia WHERE id=:id")
-                ->execute([':n'=>$_POST['component_name'],':ct'=>$_POST['component_type'],':calc'=>$_POST['calculation_type'],
-                           ':val'=>$_POST['default_value']??0,':tx'=>isset($_POST['is_taxable'])?'true':'false',
-                           ':ia'=>isset($_POST['is_active'])?'true':'false',':id'=>$cId]);
-        } else {
-            $conn->prepare("INSERT INTO salary_components (component_code,component_name,component_type,calculation_type,default_value,is_taxable,is_active)
-                VALUES (:code,:n,:ct,:calc,:val,:tx,:ia)")
-                ->execute([':code'=>strtoupper(preg_replace('/[^A-Z0-9]/','',$_POST['component_code']??'')),
-                           ':n'=>$_POST['component_name'],':ct'=>$_POST['component_type'],':calc'=>$_POST['calculation_type'],
-                           ':val'=>$_POST['default_value']??0,':tx'=>isset($_POST['is_taxable'])?'true':'false',
-                           ':ia'=>isset($_POST['is_active'])?'true':'false']);
-        }
-        $msg = "Salary component saved.";
-    } catch(Exception $e) { $err = $e->getMessage(); }
-}
+    case 'save_ot_rule':
+        try {
+            $rId  = (int)($_POST['rule_id'] ?? 0);
+            $rd   = [
+                ':n'    => $_POST['rule_name']  ?? '',
+                ':d'    => $_POST['day_type']   ?? 'WEEKDAY',
+                ':min'  => (float)($_POST['min_hours'] ?? 8),
+                ':r'    => (float)($_POST['ot_rate']   ?? 1.5),
+                ':max'  => (float)($_POST['max_hours'] ?? 4),
+                ':a'    => isset($_POST['requires_approval']) ? 'true' : 'false',
+                ':ia'   => isset($_POST['is_active'])        ? 'true' : 'false',
+                ':lvl'  => (int)($_POST['level_id'] ?? 0) ?: null,
+                ':et'   => $_POST['emp_type'] ?? null,
+            ];
+            if ($rId) {
+                $conn->prepare("UPDATE ot_rules SET rule_name=:n,day_type=:d,min_hours_for_ot=:min,ot_rate=:r,max_ot_hours_per_day=:max,requires_approval=:a,is_active=:ia,level_id=:lvl,emp_type=:et WHERE id=:id")
+                     ->execute(array_merge($rd,[':id'=>$rId]));
+            } else {
+                $conn->prepare("INSERT INTO ot_rules (rule_name,day_type,min_hours_for_ot,ot_rate,max_ot_hours_per_day,requires_approval,is_active,effective_from,level_id,emp_type) VALUES (:n,:d,:min,:r,:max,:a,:ia,:ef,:lvl,:et)")
+                     ->execute(array_merge($rd,[':ef'=>date('Y-m-d')]));
+            }
+            $msg = "OT Rule saved.";
+        } catch(Exception $e) { $err = $e->getMessage(); }
+        break;
+
+    case 'save_component':
+        try {
+            $cId = (int)($_POST['component_id'] ?? 0);
+            $cd  = [
+                ':n'    => $_POST['component_name']     ?? '',
+                ':ct'   => $_POST['component_type']     ?? 'EARNING',
+                ':calc' => $_POST['calculation_type']   ?? 'FIXED',
+                ':val'  => (float)($_POST['default_value'] ?? 0),
+                ':tx'   => isset($_POST['is_taxable']) ? 'true' : 'false',
+                ':ia'   => isset($_POST['is_active'])  ? 'true' : 'false',
+            ];
+            if ($cId) {
+                $conn->prepare("UPDATE salary_components SET component_name=:n,component_type=:ct,calculation_type=:calc,default_value=:val,is_taxable=:tx,is_active=:ia WHERE id=:id")
+                     ->execute(array_merge($cd,[':id'=>$cId]));
+            } else {
+                $conn->prepare("INSERT INTO salary_components (component_code,component_name,component_type,calculation_type,default_value,is_taxable,is_active) VALUES (:code,:n,:ct,:calc,:val,:tx,:ia)")
+                     ->execute(array_merge($cd,[':code'=>strtoupper(preg_replace('/[^A-Z0-9]/', '', $_POST['component_code'] ?? 'COMP'.time()))]));
+            }
+            $msg = "Salary component saved.";
+        } catch(Exception $e) { $err = $e->getMessage(); }
+        break;
+
+} // end switch
 
 // ── Load tab data ─────────────────────────────────────────────
 $holidays   = $conn->query("SELECT h.*,ht.type_name,ht.color_code FROM holidays h LEFT JOIN holiday_types ht ON h.holiday_type_id=ht.id ORDER BY h.holiday_date_eng DESC")->fetchAll(PDO::FETCH_ASSOC);
@@ -432,43 +440,95 @@ body{background:#f0f2f8}
     </div>
 </div>
 
-<?php elseif ($tab === 'ot_rules'): ?>
-<!-- ══ OT RULES ═════════════════════════════════════════════ -->
+<?php elseif ($tab === 'ot_rules'):
+$otRulesAll = $conn->query("
+    SELECT r.*, l.name AS level_name, l.remarks AS level_title
+    FROM ot_rules r
+    LEFT JOIN level l ON r.level_id=l.id
+    ORDER BY r.day_type, l.display_order DESC NULLS LAST, r.rule_name
+")->fetchAll(PDO::FETCH_ASSOC);
+?>
+<!-- ══ OT RULES (Level-based) ═══════════════════════════════ -->
 <div class="panel">
-    <div class="px-3 py-2 border-bottom d-flex justify-content-between">
-        <h6 class="mb-0 fw-bold"><i class="fas fa-clock me-1"></i>Overtime Rules</h6>
-        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#otModal">
+    <div class="px-3 py-2 border-bottom d-flex justify-content-between align-items-center">
+        <div>
+            <h6 class="mb-0 fw-bold"><i class="fas fa-clock me-1"></i>Overtime Rules</h6>
+            <small class="text-muted">Rules can be level-specific (e.g. Level 6+ gets 2× on weekdays) or apply to ALL levels.</small>
+        </div>
+        <button class="btn btn-primary btn-sm" data-bs-toggle="modal" data-bs-target="#otModal" onclick="resetOTForm()">
             <i class="fas fa-plus me-1"></i>Add Rule
         </button>
     </div>
     <div class="table-responsive">
         <table class="table table-sm table-hover mb-0" style="font-size:.82rem">
-            <thead class="table-light">
-                <tr><th>Rule Name</th><th>Day Type</th><th>Min Hours for OT</th><th>OT Rate</th><th>Max OT/Day</th><th>Approval Req?</th><th>Active</th><th>Actions</th></tr>
+            <thead class="table-dark">
+                <tr>
+                    <th>Rule Name</th>
+                    <th>Day Type</th>
+                    <th>Applies To Level</th>
+                    <th>Emp Type</th>
+                    <th>Min Hours</th>
+                    <th>OT Rate</th>
+                    <th>Max/Day</th>
+                    <th>Approval</th>
+                    <th>Active</th>
+                    <th>Actions</th>
+                </tr>
             </thead>
             <tbody>
-            <?php foreach($otRules as $r): ?>
+            <?php
+            // Group by day_type for readability
+            $dayGroups = [];
+            foreach($otRulesAll as $r) {
+                $dayGroups[$r['day_type']][] = $r;
+            }
+            foreach($dayGroups as $dayType => $rules):
+                $dayColors = ['WEEKDAY'=>'bg-primary','WEEKEND'=>'bg-success','HOLIDAY'=>'bg-danger'];
+            ?>
+            <tr style="background:#f8f9fc">
+                <td colspan="10" class="py-1 px-3 fw-semibold" style="font-size:.76rem;color:#2c3e8c">
+                    <span class="badge <?= $dayColors[$dayType] ?? 'bg-secondary' ?> me-1"><?= $dayType ?></span>
+                    <?= count($rules) ?> rule(s)
+                </td>
+            </tr>
+            <?php foreach($rules as $r): ?>
             <tr>
                 <td><strong><?= htmlspecialchars($r['rule_name']) ?></strong></td>
-                <td><span class="badge bg-info text-dark" style="font-size:.65rem"><?= $r['day_type'] ?></span></td>
+                <td><span class="badge <?= $dayColors[$r['day_type']] ?? 'bg-secondary' ?>" style="font-size:.62rem"><?= $r['day_type'] ?></span></td>
+                <td>
+                    <?php if($r['level_id']): ?>
+                    <span class="badge bg-warning text-dark" style="font-size:.65rem">
+                        L<?= $r['level_name'] ?> — <?= htmlspecialchars($r['level_title'] ?? '') ?>
+                    </span>
+                    <?php else: ?>
+                    <span class="text-muted" style="font-size:.75rem">All Levels</span>
+                    <?php endif; ?>
+                </td>
+                <td>
+                    <?php if($r['emp_type']): ?>
+                    <span class="badge bg-secondary" style="font-size:.62rem"><?= $r['emp_type'] ?></span>
+                    <?php else: ?>
+                    <span class="text-muted" style="font-size:.75rem">All Types</span>
+                    <?php endif; ?>
+                </td>
                 <td><?= $r['min_hours_for_ot'] ?>h</td>
-                <td><strong class="text-success"><?= $r['ot_rate'] ?>×</strong> hourly rate</td>
+                <td><strong class="text-success"><?= $r['ot_rate'] ?>×</strong> <small class="text-muted">hourly</small></td>
                 <td><?= $r['max_ot_hours_per_day'] ?>h</td>
-                <td><?= $r['requires_approval'] ? '✓ Yes' : '✗ No' ?></td>
+                <td><?= $r['requires_approval'] ? '<span class="text-success">✓</span>' : '<span class="text-muted">✗</span>' ?></td>
                 <td><?= $r['is_active'] ? '<span class="badge bg-success" style="font-size:.6rem">Active</span>' : '<span class="badge bg-secondary" style="font-size:.6rem">Off</span>' ?></td>
                 <td>
                     <button class="btn btn-xs btn-outline-primary" style="font-size:.65rem"
                             onclick='editOTRule(<?= json_encode($r) ?>)'>Edit</button>
                 </td>
             </tr>
-            <?php endforeach; ?>
+            <?php endforeach; endforeach; ?>
             </tbody>
         </table>
     </div>
     <div class="p-3 bg-light border-top" style="font-size:.78rem">
-        <strong>How OT is calculated in payroll:</strong><br>
-        Hourly Rate = Basic Salary ÷ (Working Days × 8 hours)<br>
-        OT Amount = OT Hours × Hourly Rate × OT Rate multiplier
+        <strong>How level-based OT works:</strong> Rules with a specific Level override "All Levels" rules.
+        The system picks the most specific matching rule for each employee.
+        Hourly Rate = Basic Salary ÷ (Working Days × 8h) · OT Amount = OT Hours × Hourly Rate × Rate
     </div>
 </div>
 
@@ -779,19 +839,58 @@ body{background:#f0f2f8}
         <input type="hidden" name="action" value="save_ot_rule">
         <input type="hidden" name="rule_id" id="otId" value="0">
         <div class="modal-body">
+            <div class="alert alert-info py-2 small mb-3">
+                <i class="fas fa-info-circle me-1"></i>
+                Set <strong>Level</strong> to apply this rule only to employees at or above that level.
+                Leave blank to apply to <strong>all levels</strong>.
+                Level-specific rules override the "all levels" rule during payroll.
+            </div>
             <div class="row g-3">
-                <div class="col-6"><label class="form-label fw-semibold">Rule Name</label>
-                    <input type="text" name="rule_name" id="otName" class="form-control" required></div>
-                <div class="col-6"><label class="form-label fw-semibold">Day Type</label>
+                <div class="col-8"><label class="form-label fw-semibold">Rule Name <span class="text-danger">*</span></label>
+                    <input type="text" name="rule_name" id="otName" class="form-control" required
+                           placeholder="e.g. Weekday OT Level 6+"></div>
+                <div class="col-4"><label class="form-label fw-semibold">Day Type</label>
                     <select name="day_type" id="otDay" class="form-select">
                         <option value="WEEKDAY">Weekday</option>
                         <option value="WEEKEND">Weekend</option>
                         <option value="HOLIDAY">Holiday</option>
                     </select></div>
+
+                <!-- Level and Emp Type (NEW) -->
+                <div class="col-6">
+                    <label class="form-label fw-semibold">
+                        Applies to Level
+                        <small class="text-muted fw-normal">(blank = all)</small>
+                    </label>
+                    <select name="level_id" id="otLevel" class="form-select">
+                        <option value="">— All Levels —</option>
+                        <?php
+                        $levels4ot = $conn->query("SELECT id,name,remarks FROM level WHERE status=true ORDER BY display_order DESC")->fetchAll(PDO::FETCH_ASSOC);
+                        foreach($levels4ot as $lv): ?>
+                        <option value="<?= $lv['id'] ?>">L<?= $lv['name'] ?> — <?= htmlspecialchars($lv['remarks'] ?? '') ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                    <small class="text-muted">e.g. select L6 → applies to Level 6 employees only</small>
+                </div>
+                <div class="col-6">
+                    <label class="form-label fw-semibold">
+                        Employee Type
+                        <small class="text-muted fw-normal">(blank = all)</small>
+                    </label>
+                    <select name="emp_type" id="otEmpType" class="form-select">
+                        <option value="">— All Types —</option>
+                        <option value="PERMANENT">Permanent</option>
+                        <option value="CONTRACT">Contract</option>
+                        <option value="DAILY_WAGES">Daily Wages</option>
+                    </select>
+                </div>
+
                 <div class="col-4"><label class="form-label fw-semibold">Min Hours for OT</label>
-                    <input type="number" name="min_hours" id="otMin" class="form-control" step="0.5" value="8"></div>
+                    <input type="number" name="min_hours" id="otMin" class="form-control" step="0.5" value="8">
+                    <small class="text-muted">Hours worked before OT starts</small></div>
                 <div class="col-4"><label class="form-label fw-semibold">OT Rate (×)</label>
-                    <input type="number" name="ot_rate" id="otRate" class="form-control" step="0.25" value="1.5"></div>
+                    <input type="number" name="ot_rate" id="otRate" class="form-control" step="0.25" value="1.5">
+                    <small class="text-muted">Multiplier of hourly rate</small></div>
                 <div class="col-4"><label class="form-label fw-semibold">Max OT/Day (hrs)</label>
                     <input type="number" name="max_hours" id="otMax" class="form-control" step="0.5" value="4"></div>
                 <div class="col-6">
@@ -902,15 +1001,29 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // OT Rule edit
+function resetOTForm() {
+    document.getElementById('otId').value        = '0';
+    document.getElementById('otName').value      = '';
+    document.getElementById('otDay').value       = 'WEEKDAY';
+    document.getElementById('otLevel').value     = '';
+    document.getElementById('otEmpType').value   = '';
+    document.getElementById('otMin').value       = '8';
+    document.getElementById('otRate').value      = '1.5';
+    document.getElementById('otMax').value       = '4';
+    document.getElementById('otApproval').checked = true;
+    document.getElementById('otActive').checked   = true;
+}
 function editOTRule(r) {
-    document.getElementById('otId').value       = r.id;
-    document.getElementById('otName').value     = r.rule_name;
-    document.getElementById('otDay').value      = r.day_type;
-    document.getElementById('otMin').value      = r.min_hours_for_ot;
-    document.getElementById('otRate').value     = r.ot_rate;
-    document.getElementById('otMax').value      = r.max_ot_hours_per_day;
-    document.getElementById('otApproval').checked = r.requires_approval;
-    document.getElementById('otActive').checked   = r.is_active;
+    document.getElementById('otId').value        = r.id;
+    document.getElementById('otName').value      = r.rule_name;
+    document.getElementById('otDay').value       = r.day_type;
+    document.getElementById('otLevel').value     = r.level_id || '';
+    document.getElementById('otEmpType').value   = r.emp_type || '';
+    document.getElementById('otMin').value       = r.min_hours_for_ot;
+    document.getElementById('otRate').value      = r.ot_rate;
+    document.getElementById('otMax').value       = r.max_ot_hours_per_day;
+    document.getElementById('otApproval').checked = !!r.requires_approval;
+    document.getElementById('otActive').checked   = !!r.is_active;
     new bootstrap.Modal(document.getElementById('otModal')).show();
 }
 
