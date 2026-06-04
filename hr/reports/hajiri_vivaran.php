@@ -95,7 +95,7 @@ if ($empType)    { $sql .= " AND e.emp_type = :et";   $params[':et'] = $empType;
 if ($deptFilter) { $sql .= " AND e.department_id = :d"; $params[':d'] = $deptFilter; }
 
 $sql .= " GROUP BY e.id, e.code, e.name, e.name_nep, e.emp_type,
-          d.name, dep.name, l.name,
+          d.name, dep.name, l.id, l.name, l.display_order,
           lb_home.balance_leaves, lb_sick.balance_leaves, lb_home.carried_forward
           ORDER BY l.display_order DESC NULLS LAST, e.code";
 
