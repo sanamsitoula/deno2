@@ -102,15 +102,19 @@ $jemcAll = $conn->query("
 $zkAll = [];
 $zkByUserId = [];
 if ($zk_conn) {
+    // employees table: id, device_id, uid, user_id, name, created_at, updated_at
+    // attendance_logs table: user_id, timestamp, punch_count — join for stats
     $zkRaw = $zk_conn->query("
-        SELECT user_id, MAX(name) AS name,
-               COUNT(DISTINCT id) AS device_count,
-               MAX(timestamp)     AS last_seen,
-               COUNT(*)           AS punch_count
-        FROM employees
-        WHERE name IS NOT NULL
-        GROUP BY user_id
-        ORDER BY name
+        SELECT e.user_id,
+               MAX(e.name)              AS name,
+               COUNT(DISTINCT e.device_id) AS device_count,
+               MAX(al.timestamp)        AS last_seen,
+               COUNT(al.id)             AS punch_count
+        FROM employees e
+        LEFT JOIN attendance_logs al ON al.user_id = e.user_id
+        WHERE e.name IS NOT NULL
+        GROUP BY e.user_id
+        ORDER BY MAX(e.name)
     ")->fetchAll(PDO::FETCH_ASSOC);
 
     foreach ($zkRaw as $zk) {
