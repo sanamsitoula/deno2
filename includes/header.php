@@ -146,6 +146,8 @@ $current_page = basename($_SERVER['PHP_SELF']);
         <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="<?= getUrl('attendance_device/zkteco_live.php') ?>"><i class="bi bi-fingerprint me-1"></i>ZKTeco Live</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('attendance_device/attendance_report.php') ?>"><i class="bi bi-calendar-check me-1"></i>Attendance Report</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('hr/reports/hajiri_vivaran.php') ?>"><i class="bi bi-table me-1"></i>हाजिरी विवरण</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('hr/reports/talab_report.php') ?>"><i class="bi bi-cash me-1"></i>तलब विवरण</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/modules/attendance/mark.php') ?>"><i class="bi bi-check2-square me-1"></i>Mark Attendance</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/modules/leaves/apply.php') ?>"><i class="bi bi-envelope me-1"></i>Leave Applications</a></li>
         <?php if (can_access_module('payroll')): ?>
