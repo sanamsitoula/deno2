@@ -12,67 +12,100 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 redirect_if_not_logged_in();
 
 // ── Sync: ZKTecePuller → press_jemc ──────────────────────────
-$syncMsg = '';
+$syncMsg = ''; $syncDetails = [];
 if (isset($_POST['sync']) && $zk_conn) {
     $syncDate = $_POST['sync_date'] ?? date('Y-m-d');
-    $synced   = 0;
-    $errors   = 0;
+    $synced = $matched_by_id = $matched_by_name = $no_match = $errors = 0;
 
-    // Get status_id for Present (P)
     $presentStatusId = $conn->query("SELECT id FROM attendance_status WHERE status_code='P' LIMIT 1")->fetchColumn();
 
-    // Load ZKTecePuller employee mapping — match by user_id to employee.card_id or attendance_id
+    // Get per-person daily summary: first check-in + last check-out across ALL devices
     $punchStmt = $zk_conn->prepare("
-        SELECT DISTINCT ON (al.uid)
-               al.uid, al.user_id, al.name,
-               MIN(al.timestamp) FILTER (WHERE al.punch IN (0,255)) OVER (PARTITION BY al.uid, al.timestamp::date) AS first_in,
-               MAX(al.timestamp) FILTER (WHERE al.punch = 1)       OVER (PARTITION BY al.uid, al.timestamp::date) AS last_out
-        FROM attendance_logs al
-        WHERE al.timestamp::date = :d
-        ORDER BY al.uid, al.timestamp
+        SELECT user_id, MAX(name) AS zk_name,
+               MIN(timestamp AT TIME ZONE 'Asia/Kathmandu') AS first_in,
+               MAX(timestamp AT TIME ZONE 'Asia/Kathmandu') AS last_out,
+               COUNT(*) AS punch_count
+        FROM attendance_logs
+        WHERE timestamp::date = :d
+        GROUP BY user_id
+        ORDER BY user_id
     ");
     $punchStmt->execute([':d' => $syncDate]);
     $punches = $punchStmt->fetchAll(PDO::FETCH_ASSOC);
 
+    // Build a name→employee map from press_jemc for fast lookup
+    $jemc_emp_rows = $conn->query("
+        SELECT id, name, attendance_id, card_id
+        FROM employee WHERE deleted_date IS NULL AND emp_status='ACTIVE'
+    ")->fetchAll(PDO::FETCH_ASSOC);
+
+    // Index by: attendance_id, card_id, and normalised name
+    $byAttId   = []; // attendance_id → jemc employee id
+    $byCardId  = []; // card_id → jemc employee id
+    $byName    = []; // normalised name → jemc employee id
+    foreach ($jemc_emp_rows as $je) {
+        if (!empty($je['attendance_id'])) $byAttId[trim($je['attendance_id'])]  = $je['id'];
+        if (!empty($je['card_id']))       $byCardId[trim($je['card_id'])]        = $je['id'];
+        $normalName = strtolower(preg_replace('/\s+/', ' ', trim($je['name'])));
+        $byName[$normalName] = $je['id'];
+    }
+
     foreach ($punches as $punch) {
-        // Map zkteco user_id → employee
-        $empStmt = $conn->prepare("
-            SELECT id FROM employee
-            WHERE (card_id = :uid OR attendance_id::text = :uid2)
-              AND deleted_date IS NULL LIMIT 1
-        ");
-        $empStmt->execute([':uid' => $punch['user_id'], ':uid2' => $punch['user_id']]);
-        $employee = $empStmt->fetch(PDO::FETCH_ASSOC);
+        $zkUserId  = trim($punch['user_id']);
+        $zkName    = trim($punch['zk_name'] ?? '');
+        $empId     = null;
+        $matchHow  = '';
 
-        if (!$employee) continue; // No mapping
+        // 1. Match by attendance_id (previously mapped)
+        if (isset($byAttId[$zkUserId])) {
+            $empId    = $byAttId[$zkUserId];
+            $matchHow = 'attendance_id';
+            $matched_by_id++;
+        }
+        // 2. Match by card_id
+        elseif (isset($byCardId[$zkUserId])) {
+            $empId    = $byCardId[$zkUserId];
+            $matchHow = 'card_id';
+            $matched_by_id++;
+        }
+        // 3. Match by name (normalised)
+        else {
+            $normalZkName = strtolower(preg_replace('/\s+/', ' ', $zkName));
+            if (!empty($normalZkName) && isset($byName[$normalZkName])) {
+                $empId    = $byName[$normalZkName];
+                $matchHow = 'name';
+                $matched_by_name++;
+                // Auto-save attendance_id to avoid re-matching by name next time
+                $conn->prepare("UPDATE employee SET attendance_id=:aid WHERE id=:id")
+                     ->execute([':aid' => $zkUserId, ':id' => $empId]);
+                $byAttId[$zkUserId] = $empId; // update local index
+            }
+        }
 
-        $empId   = $employee['id'];
-        $checkIn = $punch['first_in'] ? date('H:i:s', strtotime($punch['first_in'])) : null;
-        $checkOut= $punch['last_out'] ? date('H:i:s', strtotime($punch['last_out'])) : null;
+        if (!$empId) { $no_match++; continue; }
+
+        $checkIn  = $punch['first_in']  ? date('H:i:s', strtotime($punch['first_in']))  : null;
+        $checkOut = $punch['last_out']   ? date('H:i:s', strtotime($punch['last_out']))  : null;
 
         try {
             $chk = $conn->prepare("SELECT id FROM attendance WHERE employee_id=:e AND attendance_date_eng=:d");
-            $chk->execute([':e'=>$empId, ':d'=>$syncDate]);
-
+            $chk->execute([':e' => $empId, ':d' => $syncDate]);
             if ($chk->fetch()) {
-                $conn->prepare("
-                    UPDATE attendance SET
-                        status_id=:s, check_in_time=:i, check_out_time=:o,
-                        data_source='ZKTECO', updated_at=NOW()
-                    WHERE employee_id=:e AND attendance_date_eng=:d
-                ")->execute([':s'=>$presentStatusId,':i'=>$checkIn,':o'=>$checkOut,':e'=>$empId,':d'=>$syncDate]);
+                $conn->prepare("UPDATE attendance SET status_id=:s,check_in_time=:i,check_out_time=:o,data_source='ZKTECO',updated_at=NOW() WHERE employee_id=:e AND attendance_date_eng=:d")
+                     ->execute([':s'=>$presentStatusId,':i'=>$checkIn,':o'=>$checkOut,':e'=>$empId,':d'=>$syncDate]);
             } else {
-                $conn->prepare("
-                    INSERT INTO attendance (employee_id,attendance_date_eng,status_id,
-                        check_in_time,check_out_time,data_source,created_at)
-                    VALUES (:e,:d,:s,:i,:o,'ZKTECO',NOW())
-                ")->execute([':e'=>$empId,':d'=>$syncDate,':s'=>$presentStatusId,':i'=>$checkIn,':o'=>$checkOut]);
+                $conn->prepare("INSERT INTO attendance (employee_id,attendance_date_eng,status_id,check_in_time,check_out_time,data_source,created_at) VALUES (:e,:d,:s,:i,:o,'ZKTECO',NOW())")
+                     ->execute([':e'=>$empId,':d'=>$syncDate,':s'=>$presentStatusId,':i'=>$checkIn,':o'=>$checkOut]);
             }
             $synced++;
+            $syncDetails[] = ['name'=>$zkName,'user_id'=>$zkUserId,'match'=>$matchHow,'in'=>$checkIn,'out'=>$checkOut];
         } catch (Exception $ex) { $errors++; }
     }
-    $syncMsg = "Synced $synced employees from ZKTecePuller for $syncDate" . ($errors?" ($errors errors)":'');
+
+    $total = count($punches);
+    $syncMsg = "Synced $synced/$total employees for $syncDate — by ID: $matched_by_id, by name: $matched_by_name, no match: $no_match" . ($errors ? ", errors: $errors" : '');
     $_SESSION['success_message'] = $syncMsg;
+    $_SESSION['sync_details']    = $syncDetails;
 }
 
 // ── Load ZKTecePuller data ────────────────────────────────────
@@ -172,6 +205,9 @@ body{background:#f0f2f8}
         </div>
     </div>
     <div class="d-flex gap-2 flex-wrap">
+        <a href="zkteco_mapping.php" class="btn btn-sm btn-outline-warning">
+            <i class="fas fa-link me-1"></i>Employee Mapping
+        </a>
         <a href="attendance_report.php?type=daily&date=<?= $viewDate ?>" class="btn btn-sm btn-outline-primary">
             <i class="fas fa-calendar-day me-1"></i>Daily Report
         </a>

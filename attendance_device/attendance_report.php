@@ -175,7 +175,8 @@ if ($export === 'pdf') {
             $this->Cell(0,6,$this->rptTitle,0,1,'C');
             $this->SetFont('helvetica','',7);
             $this->Cell(0,5,'Generated: '.$this->printed.' | Page '.$this->getPage(),0,1,'C');
-            $this->Line($this->getX(), $this->getY(), $this->getPageWidth()-$this->getRMargin(), $this->getY());
+            $margins = $this->getMargins();
+            $this->Line($this->getX(), $this->getY(), $this->getPageWidth()-$margins['right'], $this->getY());
             $this->Ln(2);
         }
         public function Footer() {
