@@ -145,6 +145,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
         <li><a class="dropdown-item" href="<?= getUrl('hr/employee/department/index.php') ?>"><i class="bi bi-diagram-3 me-1"></i>Departments</a></li>
         <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="<?= getUrl('attendance_device/zkteco_live.php') ?>"><i class="bi bi-fingerprint me-1"></i>ZKTeco Live</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('attendance_device/device_users.php') ?>"><i class="bi bi-hdd-network me-1"></i>Device Users</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('attendance_device/attendance_report.php') ?>"><i class="bi bi-calendar-check me-1"></i>Attendance Report</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/reports/hajiri_vivaran.php') ?>"><i class="bi bi-table me-1"></i>हाजिरी विवरण</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/reports/talab_report.php') ?>"><i class="bi bi-cash me-1"></i>तलब विवरण</a></li>
