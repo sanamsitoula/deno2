@@ -154,6 +154,7 @@ $current_page = basename($_SERVER['PHP_SELF']);
         <?php endif; ?>
         <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="<?= getUrl('hr/setup/index.php') ?>"><i class="bi bi-gear-fill me-1"></i>Payroll Setup</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('hr/setup/salary.php') ?>"><i class="bi bi-sliders me-1"></i>Salary & Grades</a></li>
     </ul>
 </li>
 <?php endif; ?>
