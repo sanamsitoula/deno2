@@ -5,82 +5,180 @@ redirect_if_not_logged_in();
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
-
-// Pagination settings
-$items_per_page = 50;
-$current_page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
-$offset = ($current_page - 1) * $items_per_page;
 
 // Filter parameters
-$book_code_filter = isset($_GET['book_code']) ? trim($_GET['book_code']) : '';
-$class_filter = isset($_GET['class']) ? trim($_GET['class']) : '';
-$fiscal_year_filter = isset($_GET['fiscal_year']) ? trim($_GET['fiscal_year']) : '';
-$is_translated_filter = isset($_GET['is_translated']) ? $_GET['is_translated'] : '';
-$is_optional_filter = isset($_GET['is_optional']) ? $_GET['is_optional'] : '';
-$search_text = isset($_GET['search']) ? trim($_GET['search']) : '';
-// Add to filter parameters section (around line 20):
-$business_filter = isset($_GET['business']) ? trim($_GET['business']) : '';
-$book_type_filter = isset($_GET['book_type']) ? trim($_GET['book_type']) : '';
+$book_code_filter     = isset($_GET['book_code'])     ? trim($_GET['book_code'])     : '';
+$class_filter         = isset($_GET['class'])         ? trim($_GET['class'])         : '';
+$fiscal_year_filter   = isset($_GET['fiscal_year'])   ? trim($_GET['fiscal_year'])   : '';
+$is_translated_filter = isset($_GET['is_translated']) ? $_GET['is_translated']       : '';
+$is_optional_filter   = isset($_GET['is_optional'])   ? $_GET['is_optional']         : '';
+$search_text          = isset($_GET['search'])        ? trim($_GET['search'])        : '';
+$business_filter      = isset($_GET['business'])      ? trim($_GET['business'])      : '';
+$book_type_filter     = isset($_GET['book_type'])     ? trim($_GET['book_type'])     : '';
 
-// Build WHERE clause for filters
+// Build WHERE clause
 $where_conditions = [];
-$params = [];
+$filter_params    = [];
 
 if (!empty($book_code_filter)) {
     $where_conditions[] = "book_code ILIKE ?";
-    $params[] = "%$book_code_filter%";
+    $filter_params[] = "%$book_code_filter%";
 }
-
 if (!empty($class_filter)) {
     $where_conditions[] = "class_level = ?";
-    $params[] = $class_filter;
+    $filter_params[] = $class_filter;
 }
-
 if (!empty($fiscal_year_filter)) {
     $where_conditions[] = "fiscal_year ILIKE ?";
-    $params[] = "%$fiscal_year_filter%";
+    $filter_params[] = "%$fiscal_year_filter%";
 }
-
 if ($is_translated_filter !== '') {
     $where_conditions[] = "is_translated = ?";
-    $params[] = $is_translated_filter === '1' ? 't' : 'f';
+    $filter_params[] = $is_translated_filter === '1' ? 't' : 'f';
 }
-// Add to WHERE conditions (around line 45):
 if (!empty($business_filter)) {
     $where_conditions[] = "business_associated = ?";
-    $params[] = $business_filter;
+    $filter_params[] = $business_filter;
 }
-
 if (!empty($book_type_filter)) {
     $where_conditions[] = "book_type = ?";
-    $params[] = $book_type_filter;
+    $filter_params[] = $book_type_filter;
 }
-
 if ($is_optional_filter !== '') {
     $where_conditions[] = "is_optional = ?";
-    $params[] = $is_optional_filter === '1' ? 't' : 'f';
+    $filter_params[] = $is_optional_filter === '1' ? 't' : 'f';
 }
-
 if (!empty($search_text)) {
     $where_conditions[] = "(book_code ILIKE ? OR book_name ILIKE ?)";
-    $params[] = "%$search_text%";
-    $params[] = "%$search_text%";
+    $filter_params[] = "%$search_text%";
+    $filter_params[] = "%$search_text%";
 }
 
 $where_clause = !empty($where_conditions) ? 'WHERE ' . implode(' AND ', $where_conditions) : '';
 
-// Get total count for pagination
+// ── Export handler — must run BEFORE any HTML output ──────────────────────────
+if (isset($_GET['export'])) {
+    $export_query = "
+        SELECT b.book_code, b.book_name, b.class_level, b.fiscal_year,
+               b.business_associated, b.book_type,
+               b.is_translated, b.is_optional, b.created_at,
+               u1.username as created_by_name
+        FROM books b
+        LEFT JOIN users u1 ON b.created_by = u1.username
+        ORDER BY b.created_at DESC
+    ";
+    // No WHERE clause — export ALL books in the database
+    $export_stmt = $conn->prepare($export_query);
+    $export_stmt->execute();
+    $export_data = $export_stmt->fetchAll();
+
+    if ($_GET['export'] === 'excel') {
+        header('Content-Type: application/vnd.ms-excel; charset=UTF-8');
+        header('Content-Disposition: attachment; filename="books_' . date('Y-m-d_H-i-s') . '.xls"');
+        header('Cache-Control: max-age=0');
+
+        echo "\xEF\xBB\xBF"; // UTF-8 BOM so Excel opens Nepali text correctly
+        echo "<table border='1'>";
+        echo "<tr>
+            <th>Book Code</th>
+            <th>Book Name</th>
+            <th>Class Level</th>
+            <th>Fiscal Year</th>
+            <th>Business</th>
+            <th>Book Type</th>
+            <th>Is Translated</th>
+            <th>Is Optional</th>
+            <th>Created By</th>
+            <th>Created Date</th>
+        </tr>";
+
+        foreach ($export_data as $row) {
+            echo "<tr>";
+            echo "<td>" . htmlspecialchars($row['book_code'])           . "</td>";
+            echo "<td>" . htmlspecialchars($row['book_name'])           . "</td>";
+            echo "<td>" . htmlspecialchars($row['class_level'] ?? 'N/A') . "</td>";
+            echo "<td>" . htmlspecialchars($row['fiscal_year'] ?? 'N/A') . "</td>";
+            echo "<td>" . htmlspecialchars($row['business_associated'] ?? 'N/A') . "</td>";
+            echo "<td>" . htmlspecialchars($row['book_type'] ?? 'N/A')  . "</td>";
+            echo "<td>" . ($row['is_translated'] ? 'Yes' : 'No')       . "</td>";
+            echo "<td>" . ($row['is_optional']   ? 'Yes' : 'No')       . "</td>";
+            echo "<td>" . htmlspecialchars($row['created_by_name'] ?? 'N/A') . "</td>";
+            echo "<td>" . htmlspecialchars($row['created_at'])          . "</td>";
+            echo "</tr>";
+        }
+        echo "</table>";
+        exit;
+    }
+
+    if ($_GET['export'] === 'pdf') {
+        header('Content-Type: text/html; charset=UTF-8');
+        $total_export = count($export_data);
+        echo '<!DOCTYPE html><html><head><meta charset="UTF-8">
+        <title>Books Report</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; font-size: 11px; }
+            h2 { text-align: center; margin-bottom: 4px; }
+            .meta { text-align: center; color: #555; margin-bottom: 14px; font-size: 10px; }
+            table { width: 100%; border-collapse: collapse; }
+            th, td { border: 1px solid #333; padding: 5px 7px; text-align: left; }
+            th { background: #e8e8e8; font-weight: bold; font-size: 10px; text-transform: uppercase; }
+            tr:nth-child(even) { background: #f9f9f9; }
+            @page { margin: 12mm; size: A4 landscape; }
+            @media print { button { display: none !important; } }
+        </style>
+        </head><body>
+        <button onclick="window.print()" style="margin-bottom:12px;padding:8px 20px;background:#0d6efd;color:#fff;border:none;border-radius:5px;cursor:pointer;font-size:13px;">
+            Print / Save as PDF
+        </button>
+        <h2>Books Report</h2>
+        <div class="meta">Generated: ' . date('Y-m-d H:i:s') . ' &nbsp;|&nbsp; Total Records: ' . $total_export . '</div>
+        <table>
+        <tr>
+            <th>#</th><th>Book Code</th><th>Book Name</th><th>Class</th>
+            <th>Fiscal Year</th><th>Business</th><th>Type</th>
+            <th>Translated</th><th>Optional</th><th>Created By</th><th>Created Date</th>
+        </tr>';
+        $n = 1;
+        foreach ($export_data as $row) {
+            echo '<tr>';
+            echo '<td>' . $n++ . '</td>';
+            echo '<td>' . htmlspecialchars($row['book_code']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['book_name']) . '</td>';
+            echo '<td>' . htmlspecialchars($row['class_level'] ?? 'N/A') . '</td>';
+            echo '<td>' . htmlspecialchars($row['fiscal_year'] ?? 'N/A') . '</td>';
+            echo '<td>' . htmlspecialchars($row['business_associated'] ?? 'N/A') . '</td>';
+            echo '<td>' . htmlspecialchars($row['book_type'] ?? 'N/A') . '</td>';
+            echo '<td>' . ($row['is_translated'] ? 'Yes' : 'No') . '</td>';
+            echo '<td>' . ($row['is_optional']   ? 'Yes' : 'No') . '</td>';
+            echo '<td>' . htmlspecialchars($row['created_by_name'] ?? 'N/A') . '</td>';
+            echo '<td>' . htmlspecialchars($row['created_at']) . '</td>';
+            echo '</tr>';
+        }
+        echo '</table></body></html>';
+        exit;
+    }
+}
+
+// ── Normal page load ───────────────────────────────────────────────────────────
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
+
+// Pagination
+$items_per_page = 50;
+$current_page   = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
+$offset         = ($current_page - 1) * $items_per_page;
+
+// Total count
 $count_query = "SELECT COUNT(*) as total FROM books $where_clause";
-$count_stmt = $conn->prepare($count_query);
-$count_stmt->execute($params);
+$count_stmt  = $conn->prepare($count_query);
+$count_stmt->execute($filter_params);
 $total_records = $count_stmt->fetch()['total'];
-$total_pages = ceil($total_records / $items_per_page);
+$total_pages   = max(1, ceil($total_records / $items_per_page));
+// Clamp current page
+if ($current_page > $total_pages) { $current_page = $total_pages; $offset = ($current_page - 1) * $items_per_page; }
 
-
-
-// Update the books query to include new fields (around line 70):
-$books_query = "
+// Paged query
+$page_params   = array_merge($filter_params, [$items_per_page, $offset]);
+$books_query   = "
     SELECT b.*, u1.username as created_by_name
     FROM books b
     LEFT JOIN users u1 ON b.created_by = u1.username
@@ -88,102 +186,45 @@ $books_query = "
     ORDER BY b.created_at DESC
     LIMIT ? OFFSET ?
 ";
-
-$params[] = $items_per_page;
-$params[] = $offset;
-
 $books_stmt = $conn->prepare($books_query);
-$books_stmt->execute($params);
+$books_stmt->execute($page_params);
 $books = $books_stmt->fetchAll();
 
-// Get filter options
+// Filter drop-down data
 $class_levels = $conn->query("SELECT DISTINCT class_level FROM books WHERE class_level IS NOT NULL ORDER BY class_level")->fetchAll();
 $fiscal_years = $conn->query("SELECT DISTINCT fiscal_year FROM books WHERE fiscal_year IS NOT NULL ORDER BY fiscal_year DESC")->fetchAll();
-
-// Handle export
-if (isset($_GET['export'])) {
-    $export_query = "
-        SELECT b.book_code, b.book_name, b.class_level, b.fiscal_year,
-               b.is_translated, b.is_optional, b.created_at,
-               u1.username as created_by_name
-        FROM books b
-        LEFT JOIN users u1 ON b.created_by = u1.username
-        $where_clause
-        ORDER BY b.created_at DESC
-    ";
-    
-    $export_params = array_slice($params, 0, -2);
-    $export_stmt = $conn->prepare($export_query);
-    $export_stmt->execute($export_params);
-    $export_data = $export_stmt->fetchAll();
-    
-    if ($_GET['export'] === 'excel') {
-        header('Content-Type: application/vnd.ms-excel');
-        header('Content-Disposition: attachment;filename="books_' . date('Y-m-d_H-i-s') . '.xls"');
-        header('Cache-Control: max-age=0');
-        
-        echo "<table border='1'>";
-        echo "<tr>";
-        echo "<th>Book Code</th>";
-        echo "<th>Book Name</th>";
-        echo "<th>Class Level</th>";
-        echo "<th>Fiscal Year</th>";
-        echo "<th>Is Translated</th>";
-        echo "<th>Is Optional</th>";
-        echo "<th>Created By</th>";
-        echo "<th>Created Date</th>";
-        echo "</tr>";
-        
-        foreach ($export_data as $row) {
-            echo "<tr>";
-            echo "<td>" . htmlspecialchars($row['book_code']) . "</td>";
-            echo "<td>" . htmlspecialchars($row['book_name']) . "</td>";
-            echo "<td>" . htmlspecialchars($row['class_level'] ?? 'N/A') . "</td>";
-            echo "<td>" . htmlspecialchars($row['fiscal_year'] ?? 'N/A') . "</td>";
-            echo "<td>" . ($row['is_translated'] ? 'Yes' : 'No') . "</td>";
-            echo "<td>" . ($row['is_optional'] ? 'Yes' : 'No') . "</td>";
-            echo "<td>" . htmlspecialchars($row['created_by_name']) . "</td>";
-            echo "<td>" . $row['created_at'] . "</td>";
-            echo "</tr>";
-        }
-        echo "</table>";
-        exit;
-    }
-}
 
 // Handle delete
 if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
     $delete_id = (int)$_POST['delete_id'];
     try {
         $conn->beginTransaction();
-        
-        // Check if book is used in job tickets
         $check_stmt = $conn->prepare("SELECT COUNT(*) as count FROM job_ticket WHERE book_id = ?");
         $check_stmt->execute([$delete_id]);
         $usage_count = $check_stmt->fetch()['count'];
-        
         if ($usage_count > 0) {
             throw new Exception("Cannot delete book. It is used in $usage_count job ticket(s).");
         }
-        
-        // Delete book
         $stmt = $conn->prepare("DELETE FROM books WHERE book_id = ?");
         $stmt->execute([$delete_id]);
-        
         $conn->commit();
         $_SESSION['success'] = 'Book deleted successfully.';
     } catch (Exception $e) {
         $conn->rollBack();
         $_SESSION['error'] = 'Error deleting book: ' . $e->getMessage();
     }
-    
     header('Location: ' . $_SERVER['PHP_SELF'] . '?' . http_build_query($_GET));
     exit;
 }
+
+// Build base URL for pagination (strip page param)
+$query_no_page = $_GET;
+unset($query_no_page['page']);
+$base_url = '?' . http_build_query($query_no_page) . '&page=';
 ?>
 
 <div class="container">
-    <!-- Header Section -->
+    <!-- Header -->
     <div class="row mb-4">
         <div class="col-md-8">
             <h2 class="text-primary fw-bold mb-1">
@@ -207,7 +248,6 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
         </div>
         <?php unset($_SESSION['success']); ?>
     <?php endif; ?>
-
     <?php if (isset($_SESSION['error'])): ?>
         <div class="alert alert-danger alert-dismissible fade show">
             <i class="fas fa-exclamation-triangle me-2"></i><?= $_SESSION['error'] ?>
@@ -216,13 +256,11 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
         <?php unset($_SESSION['error']); ?>
     <?php endif; ?>
 
-    <!-- Search & Filters Card -->
+    <!-- Search & Filters -->
     <div class="card shadow-sm mb-4">
         <div class="card-header bg-light">
             <div class="d-flex justify-content-between align-items-center">
-                <h5 class="mb-0 text-dark">
-                    <i class="fas fa-filter me-2"></i>Search & Filters
-                </h5>
+                <h5 class="mb-0 text-dark"><i class="fas fa-filter me-2"></i>Search & Filters</h5>
                 <button class="btn btn-outline-secondary btn-sm" onclick="resetFilters()">
                     <i class="fas fa-sync me-1"></i>Reset
                 </button>
@@ -261,30 +299,27 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
                             <?php endforeach; ?>
                         </select>
                     </div>
-                    <!-- Add after the fiscal_year filter -->
-<div class="col-md-2">
-    <label class="form-label fw-semibold">Business</label>
-    <select class="form-select" name="business">
-        <option value="">All Business</option>
-        <option value="CDC" <?= $business_filter === 'CDC' ? 'selected' : '' ?>>CDC</option>
-        <option value="JEMC" <?= $business_filter === 'JEMC' ? 'selected' : '' ?>>JEMC</option>
-        <option value="NTC" <?= $business_filter === 'NTC' ? 'selected' : '' ?>>NTC</option>
-        <option value="NEB" <?= $business_filter === 'NEB' ? 'selected' : '' ?>>NEB</option>
-    </select>
-</div>
-
-<div class="col-md-2">
-    <label class="form-label fw-semibold">Book Type</label>
-    <select class="form-select" name="book_type">
-        <option value="">All Types</option>
-        <option value="TextBook" <?= $book_type_filter === 'TextBook' ? 'selected' : '' ?>>Text Book</option>
-        <option value="Copy" <?= $book_type_filter === 'Copy' ? 'selected' : '' ?>>Copy</option>
-        <option value="RechargeCard" <?= $book_type_filter === 'RechargeCard' ? 'selected' : '' ?>>Recharge Card</option>
-        <option value="Lalpurja" <?= $book_type_filter === 'Lalpurja' ? 'selected' : '' ?>>Lalpurja</option>
-        <option value="QuestionPaper" <?= $book_type_filter === 'QuestionPaper' ? 'selected' : '' ?>>Question Paper</option>
-    </select>
-</div>
-
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold">Business</label>
+                        <select class="form-select" name="business">
+                            <option value="">All Business</option>
+                            <option value="CDC"  <?= $business_filter === 'CDC'  ? 'selected' : '' ?>>CDC</option>
+                            <option value="JEMC" <?= $business_filter === 'JEMC' ? 'selected' : '' ?>>JEMC</option>
+                            <option value="NTC"  <?= $business_filter === 'NTC'  ? 'selected' : '' ?>>NTC</option>
+                            <option value="NEB"  <?= $business_filter === 'NEB'  ? 'selected' : '' ?>>NEB</option>
+                        </select>
+                    </div>
+                    <div class="col-md-2">
+                        <label class="form-label fw-semibold">Book Type</label>
+                        <select class="form-select" name="book_type">
+                            <option value="">All Types</option>
+                            <option value="TextBook"      <?= $book_type_filter === 'TextBook'      ? 'selected' : '' ?>>Text Book</option>
+                            <option value="Copy"          <?= $book_type_filter === 'Copy'          ? 'selected' : '' ?>>Copy</option>
+                            <option value="RechargeCard"  <?= $book_type_filter === 'RechargeCard'  ? 'selected' : '' ?>>Recharge Card</option>
+                            <option value="Lalpurja"      <?= $book_type_filter === 'Lalpurja'      ? 'selected' : '' ?>>Lalpurja</option>
+                            <option value="QuestionPaper" <?= $book_type_filter === 'QuestionPaper' ? 'selected' : '' ?>>Question Paper</option>
+                        </select>
+                    </div>
                     <div class="col-md-1">
                         <label class="form-label fw-semibold">Translated</label>
                         <select class="form-select" name="is_translated">
@@ -314,14 +349,17 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
     <!-- Export Options -->
     <div class="card shadow-sm mb-4">
         <div class="card-body py-3">
-            <div class="d-flex justify-content-between align-items-center">
+            <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
                 <h6 class="mb-0 text-muted">
-                    <i class="fas fa-download me-2"></i>Export Options
+                    <i class="fas fa-download me-2"></i>Download All Books
+                    <small class="text-info ms-2">(exports entire database — <?= number_format($total_records) ?> filtered / all records)</small>
                 </h6>
                 <div class="btn-group">
-                    <a href="?<?= http_build_query(array_merge($_GET, ['export' => 'excel'])) ?>" 
-                       class="btn btn-success btn-sm" target="_blank">
-                        <i class="fas fa-file-excel me-1"></i>Excel
+                    <a href="?export=excel" class="btn btn-success btn-sm" target="_blank">
+                        <i class="fas fa-file-excel me-1"></i>Download Excel
+                    </a>
+                    <a href="?export=pdf" class="btn btn-danger btn-sm" target="_blank">
+                        <i class="fas fa-file-pdf me-1"></i>Download PDF
                     </a>
                     <button class="btn btn-info btn-sm" onclick="printTable()">
                         <i class="fas fa-print me-1"></i>Print
@@ -333,25 +371,28 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
 
     <!-- Results Card -->
     <div class="card shadow-sm">
-        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center flex-wrap gap-2">
             <h5 class="mb-0">
                 <i class="fas fa-list me-2"></i>Books List
                 <span class="badge bg-light text-primary ms-2"><?= number_format($total_records) ?></span>
             </h5>
             <small>
-                <?= number_format($offset + 1) ?>–<?= number_format(min($offset + $items_per_page, $total_records)) ?> of <?= number_format($total_records) ?>
+                Showing <?= number_format($offset + 1) ?>–<?= number_format(min($offset + $items_per_page, $total_records)) ?>
+                of <?= number_format($total_records) ?> records
+                &nbsp;|&nbsp; Page <?= $current_page ?> of <?= $total_pages ?>
             </small>
         </div>
         <div class="table-responsive">
             <table class="table table-hover mb-0" id="booksTable">
                 <thead class="table-dark">
                     <tr>
+                        <th>#</th>
                         <th>Book Code</th>
                         <th>Book Name</th>
                         <th>Class Level</th>
                         <th>Fiscal Year</th>
                         <th>Business</th>
-<th>Type</th>
+                        <th>Type</th>
                         <th>Translated</th>
                         <th>Optional</th>
                         <th>Created By</th>
@@ -362,14 +403,15 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
                 <tbody>
                     <?php if (empty($books)): ?>
                         <tr>
-                            <td colspan="9" class="text-center py-5">
+                            <td colspan="12" class="text-center py-5">
                                 <i class="fas fa-inbox fa-3x text-muted mb-3"></i>
                                 <p class="text-muted mb-0">No books found matching your criteria.</p>
                             </td>
                         </tr>
                     <?php else: ?>
-                        <?php foreach ($books as $book): ?>
+                        <?php foreach ($books as $index => $book): ?>
                             <tr>
+                                <td class="text-muted small"><?= $offset + $index + 1 ?></td>
                                 <td><code class="bg-light px-2 py-1 rounded"><?= htmlspecialchars($book['book_code']) ?></code></td>
                                 <td class="text-truncate" style="max-width: 250px;" title="<?= htmlspecialchars($book['book_name']) ?>">
                                     <strong><?= htmlspecialchars($book['book_name']) ?></strong>
@@ -382,12 +424,8 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
                                     <?php endif; ?>
                                 </td>
                                 <td><?= htmlspecialchars($book['fiscal_year'] ?: 'N/A') ?></td>
-                                <td>
-    <span class="badge bg-info"><?= htmlspecialchars($book['business_associated'] ?? 'CDC') ?></span>
-</td>
-<td>
-    <span class="badge bg-warning text-dark"><?= htmlspecialchars($book['book_type'] ?? 'TextBook') ?></span>
-</td>
+                                <td><span class="badge bg-info"><?= htmlspecialchars($book['business_associated'] ?? 'CDC') ?></span></td>
+                                <td><span class="badge bg-warning text-dark"><?= htmlspecialchars($book['book_type'] ?? 'TextBook') ?></span></td>
                                 <td>
                                     <?php if ($book['is_translated']): ?>
                                         <span class="badge bg-success"><i class="fas fa-check"></i> Yes</span>
@@ -405,18 +443,18 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
                                 <td><?= htmlspecialchars($book['created_by_name'] ?? 'N/A') ?></td>
                                 <td><?= date('M d, Y', strtotime($book['created_at'])) ?></td>
                                 <td>
-                                    <a href="view.php?id=<?= $book['book_id'] ?>" class="btn btn-sm " title="View Details">
-                              
+                                    <a href="view.php?id=<?= $book['book_id'] ?>" class="btn btn-sm btn-outline-info" title="View">
+                                        <i class="fas fa-eye"></i>
                                     </a>
                                     <?php if (has_role('editor') || has_role('admin')): ?>
-                                        <a href="edit.php?id=<?= $book['book_id'] ?>" class="btn btn-sm " title="Edit">
-                                        
+                                        <a href="edit.php?id=<?= $book['book_id'] ?>" class="btn btn-sm btn-outline-warning" title="Edit">
+                                            <i class="fas fa-edit"></i>
                                         </a>
                                     <?php endif; ?>
                                     <?php if (has_role('admin')): ?>
-                                        <button onclick="confirmDelete(<?= $book['book_id'] ?>, '<?= htmlspecialchars($book['book_code']) ?>')" 
-                                                class="btn btn-sm " title="Delete">
-                                         
+                                        <button onclick="confirmDelete(<?= $book['book_id'] ?>, '<?= htmlspecialchars($book['book_code']) ?>')"
+                                                class="btn btn-sm btn-outline-danger" title="Delete">
+                                            <i class="fas fa-trash"></i>
                                         </button>
                                     <?php endif; ?>
                                 </td>
@@ -430,30 +468,84 @@ if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
         <!-- Pagination -->
         <?php if ($total_pages > 1): ?>
             <div class="card-footer bg-light">
-                <nav>
-                    <ul class="pagination justify-content-center mb-0">
-                        <?php
-                        $query_params = $_GET;
-                        unset($query_params['page']);
-                        $base_url = '?' . http_build_query($query_params) . '&page=';
-                        ?>
-                        <li class="page-item <?= $current_page <= 1 ? 'disabled' : '' ?>">
-                            <a class="page-link" href="<?= $base_url . ($current_page - 1) ?>">
-                                <i class="fas fa-chevron-left"></i> Prev
-                            </a>
-                        </li>
-                        <?php for ($i = max(1, $current_page - 2); $i <= min($total_pages, $current_page + 2); $i++): ?>
-                            <li class="page-item <?= $i == $current_page ? 'active' : '' ?>">
-                                <a class="page-link" href="<?= $base_url . $i ?>"><?= $i ?></a>
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <small class="text-muted">
+                        Page <strong><?= $current_page ?></strong> of <strong><?= $total_pages ?></strong>
+                        &nbsp;&mdash;&nbsp; <?= number_format($total_records) ?> total records
+                    </small>
+                    <nav>
+                        <ul class="pagination pagination-sm justify-content-center mb-0">
+
+                            <!-- First -->
+                            <li class="page-item <?= $current_page <= 1 ? 'disabled' : '' ?>">
+                                <a class="page-link" href="<?= $base_url ?>1" title="First page">
+                                    <i class="fas fa-angle-double-left"></i>
+                                </a>
                             </li>
-                        <?php endfor; ?>
-                        <li class="page-item <?= $current_page >= $total_pages ? 'disabled' : '' ?>">
-                            <a class="page-link" href="<?= $base_url . ($current_page + 1) ?>">
-                                Next <i class="fas fa-chevron-right"></i>
-                            </a>
-                        </li>
-                    </ul>
-                </nav>
+
+                            <!-- Prev -->
+                            <li class="page-item <?= $current_page <= 1 ? 'disabled' : '' ?>">
+                                <a class="page-link" href="<?= $base_url . ($current_page - 1) ?>">
+                                    <i class="fas fa-chevron-left"></i> Prev
+                                </a>
+                            </li>
+
+                            <?php
+                            // Show up to 7 page links centred on the current page
+                            $window = 3;
+                            $page_start = max(1, $current_page - $window);
+                            $page_end   = min($total_pages, $current_page + $window);
+
+                            // Leading ellipsis
+                            if ($page_start > 2): ?>
+                                <li class="page-item"><a class="page-link" href="<?= $base_url ?>1">1</a></li>
+                                <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                            <?php elseif ($page_start == 2): ?>
+                                <li class="page-item"><a class="page-link" href="<?= $base_url ?>1">1</a></li>
+                            <?php endif; ?>
+
+                            <?php for ($i = $page_start; $i <= $page_end; $i++): ?>
+                                <li class="page-item <?= $i == $current_page ? 'active' : '' ?>">
+                                    <a class="page-link" href="<?= $base_url . $i ?>"><?= $i ?></a>
+                                </li>
+                            <?php endfor; ?>
+
+                            <!-- Trailing ellipsis -->
+                            <?php if ($page_end < $total_pages - 1): ?>
+                                <li class="page-item disabled"><span class="page-link">&hellip;</span></li>
+                                <li class="page-item"><a class="page-link" href="<?= $base_url . $total_pages ?>"><?= $total_pages ?></a></li>
+                            <?php elseif ($page_end == $total_pages - 1): ?>
+                                <li class="page-item"><a class="page-link" href="<?= $base_url . $total_pages ?>"><?= $total_pages ?></a></li>
+                            <?php endif; ?>
+
+                            <!-- Next -->
+                            <li class="page-item <?= $current_page >= $total_pages ? 'disabled' : '' ?>">
+                                <a class="page-link" href="<?= $base_url . ($current_page + 1) ?>">
+                                    Next <i class="fas fa-chevron-right"></i>
+                                </a>
+                            </li>
+
+                            <!-- Last -->
+                            <li class="page-item <?= $current_page >= $total_pages ? 'disabled' : '' ?>">
+                                <a class="page-link" href="<?= $base_url . $total_pages ?>" title="Last page">
+                                    <i class="fas fa-angle-double-right"></i>
+                                </a>
+                            </li>
+                        </ul>
+                    </nav>
+
+                    <!-- Jump to page -->
+                    <form method="GET" class="d-flex align-items-center gap-2" id="jumpForm">
+                        <?php foreach ($query_no_page as $k => $v): ?>
+                            <input type="hidden" name="<?= htmlspecialchars($k) ?>" value="<?= htmlspecialchars($v) ?>">
+                        <?php endforeach; ?>
+                        <label class="text-muted small mb-0">Go to:</label>
+                        <input type="number" name="page" min="1" max="<?= $total_pages ?>"
+                               class="form-control form-control-sm" style="width:70px;"
+                               placeholder="<?= $current_page ?>">
+                        <button type="submit" class="btn btn-sm btn-outline-primary">Go</button>
+                    </form>
+                </div>
             </div>
         <?php endif; ?>
     </div>
@@ -496,155 +588,38 @@ body {
     padding: 20px;
     background-color: #f8f9fa;
 }
-
-.container {
-    max-width: 1400px;
-    margin: 0 auto;
-    background: white;
-    padding: 20px;
-    border-radius: 8px;
-}
-
-.card {
-    border: none;
-    border-radius: 12px;
-    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
-    transition: all 0.3s ease;
-}
-
-.card:hover {
-    box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
-}
-
-.card-header {
-    border-radius: 12px 12px 0 0 !important;
-    border-bottom: 1px solid rgba(255,255,255,0.1);
-}
-
-.table th {
-    background: linear-gradient(135deg, #343a40 0%, #495057 100%);
-    color: white !important;
-    font-weight: 600;
-    border: none !important;
-    text-transform: uppercase;
-    font-size: 0.85rem;
-    letter-spacing: 0.5px;
-}
-
-.table tbody tr {
-    transition: all 0.2s ease;
-}
-
-.table tbody tr:hover {
-    background-color: rgba(0, 123, 255, 0.05);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.badge {
-    font-size: 0.75em;
-    padding: 0.5em 0.8em;
-    border-radius: 8px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.btn {
-    border-radius: 8px;
-    font-weight: 500;
-    transition: all 0.2s ease;
-    border: 2px solid transparent;
-}
-
-.btn:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 4px 8px rgba(0,0,0,0.15);
-}
-
+.container { max-width: 1400px; margin: 0 auto; background: white; padding: 20px; border-radius: 8px; }
+.card { border: none; border-radius: 12px; box-shadow: 0 4px 6px -1px rgba(0,0,0,.1), 0 2px 4px -1px rgba(0,0,0,.06); transition: all .3s ease; }
+.card:hover { box-shadow: 0 10px 15px -3px rgba(0,0,0,.1), 0 4px 6px -2px rgba(0,0,0,.05); }
+.card-header { border-radius: 12px 12px 0 0 !important; border-bottom: 1px solid rgba(255,255,255,.1); }
+.table th { background: linear-gradient(135deg,#343a40 0%,#495057 100%); color: white !important; font-weight: 600; border: none !important; text-transform: uppercase; font-size: .85rem; letter-spacing: .5px; }
+.table tbody tr { transition: all .2s ease; }
+.table tbody tr:hover { background-color: rgba(0,123,255,.05); transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+.badge { font-size: .75em; padding: .5em .8em; border-radius: 8px; font-weight: 600; text-transform: uppercase; letter-spacing: .5px; }
+.btn { border-radius: 8px; font-weight: 500; transition: all .2s ease; border: 2px solid transparent; }
+.btn:hover { transform: translateY(-1px); box-shadow: 0 4px 8px rgba(0,0,0,.15); }
 .btn-outline-info:hover { background-color: #17a2b8; border-color: #17a2b8; color: white; }
 .btn-outline-warning:hover { background-color: #ffc107; border-color: #ffc107; color: #000; }
 .btn-outline-danger:hover { background-color: #dc3545; border-color: #dc3545; color: white; }
-
-.form-control, .form-select {
-    border-radius: 8px;
-    border: 2px solid #e9ecef;
-    transition: all 0.2s ease;
-}
-
-.form-control:focus, .form-select:focus {
-    border-color: #0d6efd;
-    box-shadow: 0 0 0 0.2rem rgba(13, 110, 253, 0.15);
-    transform: translateY(-1px);
-}
-
-.alert {
-    border-radius: 10px;
-    border: none;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.table-responsive {
-    border-radius: 12px;
-    overflow: hidden;
-}
-
-.pagination .page-link {
-    border-radius: 8px;
-    margin: 0 2px;
-    border: 2px solid transparent;
-    transition: all 0.2s ease;
-}
-
-.pagination .page-item.active .page-link {
-    background: linear-gradient(135deg, #0d6efd 0%, #0056b3 100%);
-    border-color: #0d6efd;
-    box-shadow: 0 2px 4px rgba(13, 110, 253, 0.3);
-}
-
-.pagination .page-link:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-}
-
-.modal-content {
-    border-radius: 15px;
-    border: none;
-    box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
-}
-
-.modal-header {
-    border-radius: 15px 15px 0 0;
-}
-
-code {
-    background-color: #f8f9fa !important;
-    color: #e83e8c !important;
-    padding: 0.2rem 0.4rem !important;
-    border-radius: 4px !important;
-    font-size: 0.875em !important;
-}
-
+.form-control, .form-select { border-radius: 8px; border: 2px solid #e9ecef; transition: all .2s ease; }
+.form-control:focus, .form-select:focus { border-color: #0d6efd; box-shadow: 0 0 0 .2rem rgba(13,110,253,.15); transform: translateY(-1px); }
+.alert { border-radius: 10px; border: none; box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+.table-responsive { border-radius: 12px; overflow: hidden; }
+.pagination .page-link { border-radius: 8px; margin: 0 2px; border: 2px solid transparent; transition: all .2s ease; }
+.pagination .page-item.active .page-link { background: linear-gradient(135deg,#0d6efd 0%,#0056b3 100%); border-color: #0d6efd; box-shadow: 0 2px 4px rgba(13,110,253,.3); }
+.pagination .page-link:hover { transform: translateY(-1px); box-shadow: 0 2px 4px rgba(0,0,0,.1); }
+.modal-content { border-radius: 15px; border: none; box-shadow: 0 25px 50px -12px rgba(0,0,0,.25); }
+.modal-header { border-radius: 15px 15px 0 0; }
+code { background-color: #f8f9fa !important; color: #e83e8c !important; padding: .2rem .4rem !important; border-radius: 4px !important; font-size: .875em !important; }
 .fw-semibold { font-weight: 600; }
 
 @media print {
-    .no-print, .btn, .card-header, .card-footer, .alert, .modal { 
-        display: none !important; 
-    }
-    .card { 
-        border: none !important; 
-        box-shadow: none !important; 
-    }
-    .table { 
-        font-size: 10px !important; 
-    }
+    .no-print, .btn, .card-header, .card-footer, .alert, .modal { display: none !important; }
+    .card { border: none !important; box-shadow: none !important; }
+    .table { font-size: 10px !important; }
 }
-
 @media (max-width: 768px) {
-    .table th, .table td {
-        font-size: 0.8rem;
-        padding: 0.5rem 0.25rem;
-    }
+    .table th, .table td { font-size: .8rem; padding: .5rem .25rem; }
 }
 </style>
 
@@ -656,37 +631,23 @@ function resetFilters() {
 function printTable() {
     const printWindow = window.open('', '_blank');
     const table = document.getElementById('booksTable').cloneNode(true);
-    
-    const actionHeaders = table.querySelectorAll('th:last-child, td:last-child');
-    actionHeaders.forEach(cell => cell.remove());
-    
-    const printContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-            <title>Books Report</title>
-            <style>
-                body { font-family: Arial, sans-serif; margin: 20px; }
-                table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-                th, td { border: 1px solid #000; padding: 8px; text-align: left; font-size: 11px; }
-                th { background-color: #f0f0f0; font-weight: bold; }
-                .header { text-align: center; margin-bottom: 20px; }
-                .badge { padding: 2px 6px; border-radius: 3px; font-size: 9px; }
-                @page { margin: 15mm; }
-            </style>
-        </head>
-        <body>
-            <div class="header">
-                <h2>Books Report</h2>
-                <p>Generated on: ${new Date().toLocaleDateString()}</p>
-                <p>Total Records: ${<?= $total_records ?>}</p>
-            </div>
-            ${table.outerHTML}
-        </body>
-        </html>
-    `;
-    
-    printWindow.document.write(printContent);
+    table.querySelectorAll('th:last-child, td:last-child').forEach(cell => cell.remove());
+    printWindow.document.write(`<!DOCTYPE html><html><head><title>Books Report</title>
+        <style>
+            body { font-family: Arial, sans-serif; margin: 20px; }
+            table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+            th, td { border: 1px solid #000; padding: 6px 8px; text-align: left; font-size: 11px; }
+            th { background-color: #f0f0f0; font-weight: bold; }
+            .header { text-align: center; margin-bottom: 20px; }
+            @page { margin: 15mm; }
+        </style></head><body>
+        <div class="header">
+            <h2>Books Report</h2>
+            <p>Generated: ${new Date().toLocaleDateString()}</p>
+            <p>Total Shown: <?= number_format($total_records) ?></p>
+        </div>
+        ${table.outerHTML}
+    </body></html>`);
     printWindow.document.close();
     printWindow.print();
 }
@@ -694,27 +655,22 @@ function printTable() {
 function confirmDelete(id, bookCode) {
     document.getElementById('deleteId').value = id;
     document.getElementById('deleteBookCode').textContent = bookCode;
-    
-    const modal = new bootstrap.Modal(document.getElementById('deleteModal'));
-    modal.show();
+    new bootstrap.Modal(document.getElementById('deleteModal')).show();
 }
 
-document.addEventListener('DOMContentLoaded', function() {
-    const selects = document.querySelectorAll('#filterForm select');
-    selects.forEach(select => {
-        select.addEventListener('change', function() {
-            document.getElementById('filterForm').submit();
-        });
+document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('#filterForm select').forEach(select => {
+        select.addEventListener('change', () => document.getElementById('filterForm').submit());
     });
-    
-    const searchInput = document.querySelector('input[name="search"]');
+
     let searchTimeout;
-    searchInput.addEventListener('input', function() {
-        clearTimeout(searchTimeout);
-        searchTimeout = setTimeout(() => {
-            document.getElementById('filterForm').submit();
-        }, 1000);
-    });
+    const searchInput = document.querySelector('input[name="search"]');
+    if (searchInput) {
+        searchInput.addEventListener('input', function () {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => document.getElementById('filterForm').submit(), 1000);
+        });
+    }
 });
 </script>
 
