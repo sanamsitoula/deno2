@@ -258,11 +258,11 @@ body{background:#f0f2f8}
             </div>
         </div>
         <div class="d-flex gap-2 flex-wrap">
-            <a href="/deno2/entries/deno.php" class="btn btn-sm btn-light fw-semibold"><i class="bi bi-plus-circle me-1"></i>Add Deno</a>
+            <a href="<?= getUrl('entries/deno.php') ?>" class="btn btn-sm btn-light fw-semibold"><i class="bi bi-plus-circle me-1"></i>Add Deno</a>
             <?php if(can_access_module('hr')): ?>
-            <a href="/deno2/hr/modules/payroll/process.php" class="btn btn-sm btn-warning fw-semibold"><i class="bi bi-cash-stack me-1"></i>Run Payroll</a>
+            <a href="<?= getUrl('hr/modules/payroll/process.php') ?>" class="btn btn-sm btn-warning fw-semibold"><i class="bi bi-cash-stack me-1"></i>Run Payroll</a>
             <?php endif; ?>
-            <a href="/deno2/reports.php" class="btn btn-sm btn-outline-light fw-semibold"><i class="bi bi-bar-chart me-1"></i>All Reports</a>
+            <a href="<?= getUrl('reports.php') ?>" class="btn btn-sm btn-outline-light fw-semibold"><i class="bi bi-bar-chart me-1"></i>All Reports</a>
         </div>
     </div>
 </div>
@@ -407,7 +407,7 @@ body{background:#f0f2f8}
         <div class="panel">
             <div class="panel-hdr">
                 <h6><i class="bi bi-graph-up-arrow me-1" style="color:var(--blue)"></i>Production Trend — Last 14 Days</h6>
-                <a href="/deno2/denoreports/daily.php" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">Daily Report</a>
+                <a href="<?= getUrl('denoreports/daily.php') ?>" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">Daily Report</a>
             </div>
             <div class="panel-body" style="padding-bottom:.5rem">
                 <canvas id="prodChart" height="90"></canvas>
@@ -420,7 +420,7 @@ body{background:#f0f2f8}
         <div class="panel">
             <div class="panel-hdr">
                 <h6><i class="bi bi-calendar-check me-1" style="color:var(--green)"></i>Attendance (7 Days)</h6>
-                <a href="/deno2/attendance_device/zkteco_index.php" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">ZKTeco</a>
+                <a href="<?= getUrl('attendance_device/zkteco_index.php') ?>" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">ZKTeco</a>
             </div>
             <div class="panel-body" style="padding-bottom:.5rem">
                 <canvas id="attChart" height="105"></canvas>
@@ -456,7 +456,7 @@ body{background:#f0f2f8}
                     </div>
                 </div>
                 <?php endforeach; ?>
-                <a href="/deno2/attendance_device/zkteco_index.php" class="btn btn-sm btn-outline-primary w-100 mt-1" style="font-size:.74rem">
+                <a href="<?= getUrl('attendance_device/zkteco_index.php') ?>" class="btn btn-sm btn-outline-primary w-100 mt-1" style="font-size:.74rem">
                     <i class="bi bi-arrow-repeat"></i> Manage Devices
                 </a>
             </div>
@@ -468,7 +468,7 @@ body{background:#f0f2f8}
         <div class="panel">
             <div class="panel-hdr">
                 <h6><i class="bi bi-diagram-3 me-1" style="color:var(--teal)"></i>Department Headcount</h6>
-                <a href="/deno2/hr/employee/index.php" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">View All</a>
+                <a href="<?= getUrl('hr/employee/index.php') ?>" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">View All</a>
             </div>
             <div class="panel-body">
                 <?php foreach($depts as $d): $pct = round($d['cnt']/$maxDept*100); ?>
@@ -489,7 +489,7 @@ body{background:#f0f2f8}
         <div class="panel">
             <div class="panel-hdr">
                 <h6><i class="bi bi-ticket-perforated me-1" style="color:var(--orange)"></i>Job Tickets</h6>
-                <a href="/deno2/jobticket/index.php" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">All Tickets</a>
+                <a href="<?= getUrl('jobticket/index.php') ?>" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">All Tickets</a>
             </div>
             <div class="panel-body">
                 <!-- Progress ring replaced with simple bar -->
@@ -522,7 +522,7 @@ body{background:#f0f2f8}
         <div class="panel">
             <div class="panel-hdr">
                 <h6><i class="bi bi-arrow-right-square me-1" style="color:var(--info)"></i>D2M Pipeline</h6>
-                <a href="/deno2/d2m/index.php" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">Open D2M</a>
+                <a href="<?= getUrl('d2m/index.php') ?>" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">Open D2M</a>
             </div>
             <div class="panel-body">
                 <?php
@@ -551,7 +551,7 @@ body{background:#f0f2f8}
         <div class="panel">
             <div class="panel-hdr">
                 <h6><i class="bi bi-table me-1" style="color:var(--blue)"></i>Recent Production Entries</h6>
-                <a href="/deno2/entries/deno.php" class="btn btn-xs btn-outline-primary" style="font-size:.7rem;padding:2px 8px"><i class="bi bi-plus"></i> Add Deno</a>
+                <a href="<?= getUrl('entries/deno.php') ?>" class="btn btn-xs btn-outline-primary" style="font-size:.7rem;padding:2px 8px"><i class="bi bi-plus"></i> Add Deno</a>
             </div>
             <div class="panel-body p-0">
                 <table class="table table-sm table-hover mb-0" style="font-size:.76rem">
@@ -576,7 +576,7 @@ body{background:#f0f2f8}
                     </tbody>
                 </table>
                 <div class="px-3 py-2" style="background:#f8f9fa;font-size:.72rem;border-top:1px solid #f0f2f8">
-                    <a href="/deno2/denoreports/daily.php" class="text-decoration-none">View full daily report →</a>
+                    <a href="<?= getUrl('denoreports/daily.php') ?>" class="text-decoration-none">View full daily report →</a>
                 </div>
             </div>
         </div>
@@ -587,7 +587,7 @@ body{background:#f0f2f8}
         <div class="panel">
             <div class="panel-hdr">
                 <h6><i class="bi bi-file-earmark-bar-graph me-1" style="color:var(--info)"></i>Quick Reports</h6>
-                <a href="/deno2/reports.php" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">All Reports</a>
+                <a href="<?= getUrl('reports.php') ?>" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">All Reports</a>
             </div>
             <div class="panel-body">
                 <?php foreach($reportLinks as $rl): ?>

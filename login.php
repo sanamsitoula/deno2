@@ -20,7 +20,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $update_stmt = $conn->prepare("UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = :id");
             $update_stmt->execute([':id' => $user['id']]);
             
-            header("Location: /deno2/entries/deno.php");
+            header("Location: " . detect_deno2_base_url() . "/entries/deno.php");
             exit();
         } else {
             $error = "Invalid username or password";

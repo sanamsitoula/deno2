@@ -73,6 +73,23 @@ Fixed with null-coalescing defaults (`$subject_data ??= [];` etc.) at the top of
 
 Side note: the canvas elements these charts target (`subjectChart`, `classChart`, etc.) don't even exist in the current `index.php` anymore — this chart code is fully dead/orphaned on the dashboard too. Not touched (out of scope for a bug-fix pass), but worth deleting in a later cleanup.
 
+## 7. Hardcoded URL prefix — broke CSS/nav/footer/redirects on the live server
+
+The live server (nginx on `10.10.10.2:80` reverse-proxying `/deno2/` → Apache on `127.0.0.1:8080`, Apache with no custom vhost, app served directly from `.../htdocs/deno2`) showed completely unstyled nav/pages — raw HTML with no CSS applied.
+
+Root cause: `includes/header.php` hardcoded `$base_url = '/jemc'`, and several core files (`config/auth.php`, `src/Core/Auth.php`, `login.php`, `logout.php`, `config/functions.php`) hardcoded redirects to `/deno2/...` or `/jemc/...` directly instead of going through `getUrl()`. This is leftover from an earlier "URL /deno2→/jemc" rename commit that only accounted for the dev box's specific Apache `Alias /jemc` setup (per `config/bootstrap.php`'s own comment: *"DOCUMENT_ROOT is fixed to D:/claude_project"* — literally this one machine). The live server was never updated to match, and still proxies `/deno2/`, so every `/jemc/assets/...` CSS/JS link 404'd, and `/jemc/login.php` redirects would 404 too.
+
+**Fix**: replaced the hardcoded prefix with `detect_deno2_base_url()` — a small function (duplicated with `function_exists()` guards in `includes/header.php`, `config/auth.php`, `config/functions.php`, and `src/Core/Auth.php`, since different pages load these in different orders) that derives the actual URL prefix for the current request by comparing `$_SERVER['SCRIPT_FILENAME']` against `$_SERVER['DOCUMENT_ROOT'] . '/deno2'`, and applying the same offset to `$_SERVER['SCRIPT_NAME']`. This works correctly regardless of whether the app is reached via `/jemc/`, `/deno2/`, or no prefix at all — **no per-environment configuration needed**.
+
+Also fixed `index.php` (the dashboard), which had the *opposite* problem — 12 links hardcoded to `/deno2/...` (never updated by that same rename commit), which only worked on the dev box by accident via the `RedirectMatch 301 /deno2 → /jemc` rule.
+
+**Not yet fixed** (same bug, but confined to files inside modules explicitly excluded from this audit — HR, attendance): `hr/setup/index.php`, `hr/employee/profile.php`, `hr/index.php`, `hr/setup/salary.php`, `hr/employee/department/index.php`, `attendance_device/device_users.php`. These pages' own internal links/redirects/image paths still hardcode `/jemc/...` — the shared nav/CSS/footer bug affecting *every* page is fixed, but navigating *within* HR pages on the live server would still hit some broken internal links until those are patched too.
+
+**Also found**: ~40 more files (mostly `auto/*`, `formaprinting/*`, `bookpacking/*`, `report/*`) contain the same hardcoded-path pattern in scattered internal links (not the shared nav/CSS, so lower visual impact, but still worth a follow-up sweep). Not fixed in this pass — flagging for a dedicated cleanup session given the surface area.
+
+## 8. Apache/Windows environment hardening (dev box only — not in git)
+Converted the bare `Alias /jemc` in this dev machine's `httpd-vhosts.conf` into a proper `VirtualHost` (`jemc.deno2`) with `DocumentRoot "D:/claude_project"` set natively, removing the fragile `auto_prepend_file` shim (`config/fix_docroot.php`) that was causing intermittent "Failed to open stream" fatals under file-system contention. This is a local environment change only, not part of the repo — your live server's Apache config is separate and untouched.
+
 ## Module audit progress
 
 Testing each module's Create / Read / Update / Delete against the live app (logged in as `usha`, role `admin`).

@@ -2,6 +2,6 @@
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
 
 session_destroy();
-header("Location: /deno2/login.php");
+header("Location: " . detect_deno2_base_url() . "/login.php");
 exit();
 ?>

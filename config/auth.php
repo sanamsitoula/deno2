@@ -4,6 +4,28 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+/**
+ * Same environment-agnostic base-URL detection as includes/header.php —
+ * duplicated here since auth.php's redirects often run before header.php
+ * is ever included. See header.php for the full explanation.
+ */
+if (!function_exists('detect_deno2_base_url')) {
+    function detect_deno2_base_url(): string {
+        $docRoot    = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+        $scriptFile = str_replace('\\', '/', $_SERVER['SCRIPT_FILENAME'] ?? '');
+        $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
+        $appRoot    = $docRoot . '/deno2';
+
+        if ($docRoot !== '' && strpos($scriptFile, $appRoot) === 0) {
+            $relative = substr($scriptFile, strlen($appRoot));
+            if (strlen($relative) <= strlen($scriptName)) {
+                return substr($scriptName, 0, strlen($scriptName) - strlen($relative));
+            }
+        }
+        return '';
+    }
+}
+
 // ── Backward-compatible flat functions ─────────────────────────────────────
 // These delegate to the Auth class when the autoloader is available,
 // so existing pages continue to work unchanged.
@@ -30,7 +52,7 @@ function has_role($required_role): bool {
 
 function redirect_if_not_logged_in(): void {
     if (!is_logged_in()) {
-        header("Location: /jemc/login.php");
+        header("Location: " . detect_deno2_base_url() . "/login.php");
         exit();
     }
 }
@@ -38,7 +60,7 @@ function redirect_if_not_logged_in(): void {
 function redirect_if_not_authorized($required_role): void {
     redirect_if_not_logged_in();
     if (!has_role($required_role)) {
-        header("Location: /jemc/unauthorized.php");
+        header("Location: " . detect_deno2_base_url() . "/unauthorized.php");
         exit();
     }
 }

@@ -19,10 +19,32 @@ class Auth
         'admin'      => ['admin'],
     ];
 
+    /**
+     * Same environment-agnostic base-URL detection as includes/header.php
+     * and config/auth.php — the app is deployed under different URL
+     * prefixes per environment (e.g. "/jemc" vs "/deno2") while always
+     * living in a filesystem folder literally named "deno2".
+     */
+    private static function baseUrl(): string
+    {
+        $docRoot    = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+        $scriptFile = str_replace('\\', '/', $_SERVER['SCRIPT_FILENAME'] ?? '');
+        $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
+        $appRoot    = $docRoot . '/deno2';
+
+        if ($docRoot !== '' && strpos($scriptFile, $appRoot) === 0) {
+            $relative = substr($scriptFile, strlen($appRoot));
+            if (strlen($relative) <= strlen($scriptName)) {
+                return substr($scriptName, 0, strlen($scriptName) - strlen($relative));
+            }
+        }
+        return '';
+    }
+
     public static function requireLogin(): void
     {
         if (!isset($_SESSION['user_id'])) {
-            header('Location: /deno2/login.php');
+            header('Location: ' . self::baseUrl() . '/login.php');
             exit();
         }
     }
@@ -34,7 +56,7 @@ class Auth
     {
         self::requireLogin();
         if (!self::canAccess($module)) {
-            header('Location: /deno2/unauthorized.php');
+            header('Location: ' . self::baseUrl() . '/unauthorized.php');
             exit();
         }
     }

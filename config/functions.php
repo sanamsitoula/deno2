@@ -1,5 +1,25 @@
 <?php
 // config/functions.php
+
+// Defensive: same detection as config/auth.php, in case this file is ever
+// loaded without auth.php first.
+if (!function_exists('detect_deno2_base_url')) {
+    function detect_deno2_base_url(): string {
+        $docRoot    = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+        $scriptFile = str_replace('\\', '/', $_SERVER['SCRIPT_FILENAME'] ?? '');
+        $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
+        $appRoot    = $docRoot . '/deno2';
+
+        if ($docRoot !== '' && strpos($scriptFile, $appRoot) === 0) {
+            $relative = substr($scriptFile, strlen($appRoot));
+            if (strlen($relative) <= strlen($scriptName)) {
+                return substr($scriptName, 0, strlen($scriptName) - strlen($relative));
+            }
+        }
+        return '';
+    }
+}
+
 // --- Utility Functions ---
 function generateJobTicketCode($conn, $fiscalYearId) {
     $fyCode = $conn->query("SELECT fiscal_code FROM fiscal_years WHERE id = $fiscalYearId")->fetchColumn();
@@ -96,7 +116,7 @@ function redirectWithError($message, $location = 'index.php') {
         header("Location: $location");
     } else {
         // Relative path - prepend base path
-        header("Location: /deno2/jobticket/$location");
+        header("Location: " . detect_deno2_base_url() . "/jobticket/$location");
     }
     exit();
 }
@@ -113,7 +133,7 @@ function redirectWithSuccess($message, $location = 'index.php') {
         header("Location: $location");
     } else {
         // Relative path - prepend base path
-        header("Location: /deno2/jobticket/$location");
+        header("Location: " . detect_deno2_base_url() . "/jobticket/$location");
     }
     exit();
 }

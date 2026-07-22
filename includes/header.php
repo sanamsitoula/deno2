@@ -1,5 +1,29 @@
 <?php
-$base_url = '/jemc';
+/**
+ * The app is deployed under different URL prefixes per environment
+ * (e.g. "/jemc" via an Apache Alias on one box, "/deno2" via a direct
+ * nginx→Apache proxy on another) while always living in a filesystem
+ * folder literally named "deno2". Detect the actual prefix for the
+ * current request instead of hardcoding one, so the same code works
+ * unmodified across environments.
+ */
+if (!function_exists('detect_deno2_base_url')) {
+    function detect_deno2_base_url(): string {
+        $docRoot    = rtrim(str_replace('\\', '/', $_SERVER['DOCUMENT_ROOT'] ?? ''), '/');
+        $scriptFile = str_replace('\\', '/', $_SERVER['SCRIPT_FILENAME'] ?? '');
+        $scriptName = $_SERVER['SCRIPT_NAME'] ?? '';
+        $appRoot    = $docRoot . '/deno2';
+
+        if ($docRoot !== '' && strpos($scriptFile, $appRoot) === 0) {
+            $relative = substr($scriptFile, strlen($appRoot)); // e.g. "/book/index.php"
+            if (strlen($relative) <= strlen($scriptName)) {
+                return substr($scriptName, 0, strlen($scriptName) - strlen($relative));
+            }
+        }
+        return ''; // fallback: served from the web root with no prefix
+    }
+}
+$base_url = detect_deno2_base_url();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/bootstrap.php';
 
 function getUrl($path = '') {
@@ -16,7 +40,7 @@ function getUrl($path = '') {
     <title>Janak Production Management System</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css" rel="stylesheet">
-    <link rel="stylesheet" href="/jemc/assets/css/jpms.css">
+    <link rel="stylesheet" href="<?= getUrl('assets/css/jpms.css') ?>">
     <!-- Nepali Date Picker (Sajanmaharjan v5) -->
     <link href="https://nepalidatepicker.sajanmaharjan.com.np/v5/nepali.datepicker/css/nepali.datepicker.v5.0.6.min.css"
           rel="stylesheet" type="text/css"/>
@@ -224,9 +248,9 @@ function getUrl($path = '') {
 <script src="https://nepalidatepicker.sajanmaharjan.com.np/v5/nepali.datepicker/js/nepali.datepicker.v5.0.6.min.js"
         type="text/javascript"></script>
 <!-- Our BS↔AD converter -->
-<script src="/jemc/assets/js/nepal-date.js"></script>
+<script src="<?= getUrl('assets/js/nepal-date.js') ?>"></script>
 <!-- Global BS Date Picker initializer -->
-<script src="/jemc/assets/js/bs-datepicker-global.js"></script>
+<script src="<?= getUrl('assets/js/bs-datepicker-global.js') ?>"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const openBtn = document.getElementById('openMobileMenu');
