@@ -12,7 +12,7 @@ if (!isset($_GET['id']) || !is_numeric($_GET['id'])) {
 $packing_id = (int)$_GET['id'];
 
 // Check permissions
-if (!has_role('supervisor') && !has_role('incharge') && !has_role('admin')) {
+if (!has_role('supervisor') && !has_role('operator') && !has_role('incharge') && !has_role('admin')) {
     ob_end_clean();
     header('Location: /deno2/unauthorized.php');
     exit();
