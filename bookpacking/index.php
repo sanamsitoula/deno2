@@ -1,4 +1,4 @@
-﻿<?php
+<?php
  ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
@@ -149,11 +149,13 @@ $stats = $stats_stmt->fetch(PDO::FETCH_ASSOC);
 
 // Handle AJAX delete request
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'delete') {
+    ob_end_clean();
+    header('Content-Type: application/json');
     try {
         $delete_id = $_POST['id'];
         $delete_stmt = $conn->prepare("UPDATE book_packing SET status = false, updated_by = :updated_by, updated_date = NOW() WHERE id = :id");
         $delete_stmt->execute([':id' => $delete_id, ':updated_by' => $_SESSION['user_id']]);
-        
+
         echo json_encode(['success' => true, 'message' => 'Packing record deleted successfully']);
         exit;
     } catch (Exception $e) {

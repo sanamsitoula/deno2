@@ -819,18 +819,9 @@ $maint_total_down   = array_sum(array_column($all_maint,'downtime_days'));
         <tbody>
         <?php foreach($all_maint as $mi=>$mr): ?>
         <?php
-        $stcls = match($mr['status']??'completed'){
-            'pending'    => 'st-pend',
-            'in_progress'=> 'st-ip',
-            'cancelled'  => 'st-canc',
-            default      => 'st-comp'
-        };
-        $stlbl = match($mr['status']??'completed'){
-            'pending'    => 'Pending',
-            'in_progress'=> 'In Progress',
-            'cancelled'  => 'Cancelled',
-            default      => 'Completed'
-        };
+        $mrStatus = $mr['status']??'completed';
+        $stcls = ['pending'=>'st-pend','in_progress'=>'st-ip','cancelled'=>'st-canc'][$mrStatus] ?? 'st-comp';
+        $stlbl = ['pending'=>'Pending','in_progress'=>'In Progress','cancelled'=>'Cancelled'][$mrStatus] ?? 'Completed';
         ?>
         <tr style="<?=$mi%2==1?'background:#fafafa':''?>">
             <td><?=$mi+1?></td>

@@ -762,5 +762,19 @@ body {
                         <td><?= number_format($deno['quantity_openpcs']) ?></td>
                         <td><strong><?= number_format($deno['total_qty']) ?></strong></td>
                         <td><?= htmlspecialchars($deno['created_by']) ?></td>
+                        <td><?= htmlspecialchars($deno['received_by'] ?: '-') ?></td>
+                        <td><?= htmlspecialchars($deno['verify_by'] ?: '-') ?></td>
+                        <td>
+                            <span class="status-badge status-<?= !empty($deno['verify_by']) ? 'verified' : 'pending' ?>">
+                                <?= !empty($deno['verify_by']) ? 'Verified' : 'Pending' ?>
+                            </span>
+                        </td>
                     </tr>
-                    </tbody>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
+    </div>
+</div>
+
+<?php require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/footer.php'; ?>

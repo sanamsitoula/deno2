@@ -148,6 +148,29 @@ if (isset($_GET['export'])) {
     }
 }
 
+// ── Handle delete (POST) — must run BEFORE any HTML output (uses header() redirect) ──
+if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
+    $delete_id = (int)$_POST['delete_id'];
+    try {
+        $conn->beginTransaction();
+        $check_stmt = $conn->prepare("SELECT COUNT(*) as count FROM job_ticket WHERE book_id = ?");
+        $check_stmt->execute([$delete_id]);
+        $usage_count = $check_stmt->fetch()['count'];
+        if ($usage_count > 0) {
+            throw new Exception("Cannot delete book. It is used in $usage_count job ticket(s).");
+        }
+        $stmt = $conn->prepare("DELETE FROM books WHERE book_id = ?");
+        $stmt->execute([$delete_id]);
+        $conn->commit();
+        $_SESSION['success'] = 'Book deleted successfully.';
+    } catch (Exception $e) {
+        $conn->rollBack();
+        $_SESSION['error'] = 'Error deleting book: ' . $e->getMessage();
+    }
+    header('Location: ' . $_SERVER['PHP_SELF'] . '?' . http_build_query($_GET));
+    exit;
+}
+
 // ── Normal page load ───────────────────────────────────────────────────────────
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
@@ -181,29 +204,6 @@ $books = $books_stmt->fetchAll();
 // Filter drop-down data
 $class_levels = $conn->query("SELECT DISTINCT class_level FROM books WHERE class_level IS NOT NULL ORDER BY class_level")->fetchAll();
 $fiscal_years = $conn->query("SELECT DISTINCT fiscal_year FROM books WHERE fiscal_year IS NOT NULL ORDER BY fiscal_year DESC")->fetchAll();
-
-// ── Handle delete (POST) ───────────────────────────────────────────────────────
-if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
-    $delete_id = (int)$_POST['delete_id'];
-    try {
-        $conn->beginTransaction();
-        $check_stmt = $conn->prepare("SELECT COUNT(*) as count FROM job_ticket WHERE book_id = ?");
-        $check_stmt->execute([$delete_id]);
-        $usage_count = $check_stmt->fetch()['count'];
-        if ($usage_count > 0) {
-            throw new Exception("Cannot delete book. It is used in $usage_count job ticket(s).");
-        }
-        $stmt = $conn->prepare("DELETE FROM books WHERE book_id = ?");
-        $stmt->execute([$delete_id]);
-        $conn->commit();
-        $_SESSION['success'] = 'Book deleted successfully.';
-    } catch (Exception $e) {
-        $conn->rollBack();
-        $_SESSION['error'] = 'Error deleting book: ' . $e->getMessage();
-    }
-    header('Location: ' . $_SERVER['PHP_SELF'] . '?' . http_build_query($_GET));
-    exit;
-}
 
 // Build base URL for pagination
 $query_no_page = $_GET;

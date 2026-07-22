@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // Inline AJAX handler for truncate count
 if (isset($_GET['ajax']) && $_GET['ajax'] === 'trunc_count') {
     require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';

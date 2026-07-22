@@ -5,7 +5,6 @@ redirect_if_not_logged_in();
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Pagination settings
 $items_per_page = 50;
@@ -212,30 +211,33 @@ if (isset($_GET['export'])) {
     }
 }
 
-// Handle delete
+// Handle delete — must also run BEFORE any HTML output (uses header() redirect)
 if (isset($_POST['delete_id']) && (has_role('admin') || has_role('editor'))) {
     $delete_id = (int)$_POST['delete_id'];
     try {
         $conn->beginTransaction();
-        
+
         // Delete job ticket details first
         $stmt = $conn->prepare("DELETE FROM job_ticket_details WHERE job_ticket_id = ?");
         $stmt->execute([$delete_id]);
-        
+
         // Delete job ticket
         $stmt = $conn->prepare("DELETE FROM job_ticket WHERE id = ?");
         $stmt->execute([$delete_id]);
-        
+
         $conn->commit();
         $_SESSION['success'] = 'Job ticket deleted successfully.';
     } catch (Exception $e) {
         $conn->rollBack();
         $_SESSION['error'] = 'Error deleting job ticket: ' . $e->getMessage();
     }
-    
+
     header('Location: ' . $_SERVER['PHP_SELF'] . '?' . http_build_query($_GET));
     exit;
 }
+
+// ── Normal page load ────────────────────────────────────────────────────────
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 ?>
 
  <div class="container">

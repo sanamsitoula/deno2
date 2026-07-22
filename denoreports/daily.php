@@ -304,11 +304,11 @@ $total_qty      = array_sum(array_column($records, 'total_qty'));
 $total_openpcs  = array_sum(array_column($records, 'quantity_openpcs'));
 $total_poka_qty = array_sum(array_column($records, 'poka_qty'));
 
-$filter_display = match($translation_filter) {
+$filter_display_map = [
     'translated'     => ' (अनुवादित मात्र / Translated Only)',
     'non_translated' => ' (गैर-अनुवादित मात्र / Non-Translated Only)',
-    default          => ' (सबै / All Books)',
-};
+];
+$filter_display = $filter_display_map[$translation_filter] ?? ' (सबै / All Books)';
 
 $class_stmt = $conn->prepare("SELECT DISTINCT class_level FROM Books WHERE class_level IS NOT NULL AND class_level > 0 ORDER BY class_level");
 $class_stmt->execute();

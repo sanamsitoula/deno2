@@ -1468,10 +1468,8 @@ document.addEventListener('DOMContentLoaded', function(){
             <td>
                 <?php
                     $jtdSt = $jtd['jtd_status'] ?? 'scheduled';
-                    $jtdBadge = match($jtdSt) {
-                        'completed' => 'b-gr', 'in_progress','printing' => 'b-bl',
-                        'scheduled' => 'b-pu', default => 'b-am'
-                    };
+                    $jtdBadgeMap = ['completed' => 'b-gr', 'in_progress' => 'b-bl', 'printing' => 'b-bl', 'scheduled' => 'b-pu'];
+                    $jtdBadge = $jtdBadgeMap[$jtdSt] ?? 'b-am';
                 ?>
                 <span class="b <?= $jtdBadge ?>"><?= h($jtdSt) ?></span>
             </td>

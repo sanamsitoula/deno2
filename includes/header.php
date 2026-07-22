@@ -7,7 +7,6 @@ function getUrl($path = '') {
     return $base_url . '/' . ltrim($path, '/');
 }
 
-$current_page = basename($_SERVER['PHP_SELF']);
 ?>
 <!DOCTYPE html>
 <html lang="en">

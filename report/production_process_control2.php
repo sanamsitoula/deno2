@@ -887,7 +887,10 @@ $totalJt=count($jtBpData);
             $isNew=$fc['job_ticket_code']!==$prevJt;$prevJt=$fc['job_ticket_code'];
             // JTD status badge
             $jtdSt=$fc['jtd_status']??'scheduled';
-            $jtdB=match(true){str_contains($jtdSt,'complet')=>'b-gr',str_contains($jtdSt,'progress')||str_contains($jtdSt,'print')=>'b-bl',str_contains($jtdSt,'schedul')=>'b-pu',default=>'b-am'};
+            if (str_contains($jtdSt,'complet')) { $jtdB='b-gr'; }
+            elseif (str_contains($jtdSt,'progress') || str_contains($jtdSt,'print')) { $jtdB='b-bl'; }
+            elseif (str_contains($jtdSt,'schedul')) { $jtdB='b-pu'; }
+            else { $jtdB='b-am'; }
         ?>
         <tr<?=$isNew?' style="border-top:2px solid var(--bd2)"':''?>>
             <td><?php if($isNew):?><span class="b b-bl"><?=h($fc['job_ticket_code'])?></span><?php endif;?></td>

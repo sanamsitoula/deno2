@@ -146,7 +146,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 $_SESSION['flash'] = ['type' => 'success', 'msg' => 'Deno record added successfully!'];
-                header('Location: http://10.10.10.2/deno2/entries/index.php');
+                header('Location: index.php');
                 exit;
 
             /* ── UPDATE ── */
@@ -210,7 +210,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ]);
 
                 $_SESSION['flash'] = ['type' => 'success', 'msg' => 'Deno record updated successfully!'];
-                header('Location: http://10.10.10.2/deno2/entries/index.php');
+                header('Location: index.php');
                 exit;
 
             /* ── DELETE (soft) ── */

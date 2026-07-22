@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // jobticket/edit.php
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';

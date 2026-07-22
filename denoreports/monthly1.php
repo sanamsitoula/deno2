@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
 redirect_if_not_logged_in();

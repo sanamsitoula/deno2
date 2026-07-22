@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
@@ -978,8 +978,9 @@ PYEOF;
         <th>डाउनटाइम</th><th>स्थिति</th><th>टिप्पणी</th>
     </tr></thead><tbody>
     <?php foreach($all_maint as $mi=>$mr):
-        $stcls=match($mr['status']??'completed'){'pending'=>'st-pend','in_progress'=>'st-ip','cancelled'=>'st-canc',default=>'st-comp'};
-        $stlbl=match($mr['status']??'completed'){'pending'=>'Pending','in_progress'=>'In Progress','cancelled'=>'Cancelled',default=>'Completed'};
+        $mrStatus=$mr['status']??'completed';
+        $stcls=['pending'=>'st-pend','in_progress'=>'st-ip','cancelled'=>'st-canc'][$mrStatus] ?? 'st-comp';
+        $stlbl=['pending'=>'Pending','in_progress'=>'In Progress','cancelled'=>'Cancelled'][$mrStatus] ?? 'Completed';
     ?>
     <tr style="<?=$mi%2==1?'background:#fafafa':''?>">
         <td><?=$mi+1?></td>

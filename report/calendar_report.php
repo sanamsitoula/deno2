@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // ═══════════════════════════════════════════════════════════════════════════
 // CALENDAR BASED PRODUCTION REPORT — v4 (Fixed schema + embedded Nepali dates)
 // Fixes: shifts.name (not shift_name), incharge JOIN, embedded NepaliDate lib

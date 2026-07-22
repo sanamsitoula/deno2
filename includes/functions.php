@@ -173,12 +173,7 @@ HTML;
 
     $sn = 1;
     foreach ($employees as $emp) {
-        $statusClass = match ($emp['emp_status']) {
-            'ACTIVE' => 'status-active',
-            'INACTIVE' => 'status-inactive',
-            'RESIGNED' => 'status-resigned',
-            default => 'status-on-leave'
-        };
+        $statusClass = ['ACTIVE' => 'status-active', 'INACTIVE' => 'status-inactive', 'RESIGNED' => 'status-resigned'][$emp['emp_status']] ?? 'status-on-leave';
 
         echo "<tr>
             <td class='text-center'>" . $sn++ . "</td>

@@ -91,12 +91,7 @@ function fixDateFormat($dateStr) {
 }
 
 function generateEmployeeCode($conn, $emp_type) {
-    $prefix = match(strtoupper($emp_type)) {
-        'PERMANENT' => 'EMP-P',
-        'CONTRACT' => 'EMP-C',
-        'DAILY_WAGES' => 'EMP-DW',
-        default => 'EMP'
-    };
+    $prefix = ['PERMANENT'=>'EMP-P','CONTRACT'=>'EMP-C','DAILY_WAGES'=>'EMP-DW'][strtoupper($emp_type)] ?? 'EMP';
     
     $stmt = $conn->query("SELECT MAX(CAST(SUBSTRING(code FROM '[0-9]+$') AS INTEGER)) 
                           FROM employee WHERE code LIKE '$prefix-%'");

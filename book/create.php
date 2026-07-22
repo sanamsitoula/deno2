@@ -4,7 +4,6 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
 redirect_if_not_logged_in();
 
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
-require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Check permissions
 if (!has_role('editor') && !has_role('admin')) {
@@ -131,6 +130,9 @@ try {
 $active_fy = !empty($fiscal_years) ? $fiscal_years[0]['fiscal_year'] : '';
 // Strip the slash part for the code (e.g. "2081/82" → "2081")
 $active_fy_code = $active_fy ? strtok($active_fy, '/') : '';
+
+// ── Normal page load — HTML output starts here ─────────────────────────────────
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 ?>
 
 <div class="container py-4" style="max-width:920px">

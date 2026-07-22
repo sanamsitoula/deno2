@@ -1,3 +1,10 @@
+<?php
+// Dashboard chart data — only set on index.php, but this footer is shared by every page
+$subject_data     ??= [];
+$class_data       ??= [];
+$job_vs_printed   ??= [];
+$daily_production ??= [];
+?>
 <footer class="bg-light text-center mt-5 p-3">
     <p class="mb-1">&copy; 2025 Janak Production Management System</p>
     <small class="text-muted">Developed & Maintained by IT Section, JEMC</small>
