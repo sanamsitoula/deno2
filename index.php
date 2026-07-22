@@ -81,38 +81,6 @@ $emp = $conn->query("
     FROM employee WHERE deleted_date IS NULL
 ")->fetch(PDO::FETCH_ASSOC);
 
-// ── ATTENDANCE TODAY ──────────────────────────────────────────
-$att = $conn->prepare("
-    SELECT COUNT(*) AS marked,
-           COUNT(*) FILTER (WHERE ast.status_code='P')  AS present,
-           COUNT(*) FILTER (WHERE ast.status_code='A')  AS absent,
-           COUNT(*) FILTER (WHERE ast.status_code='L')  AS on_leave,
-           COUNT(*) FILTER (WHERE a.check_in_time IS NOT NULL)  AS checked_in,
-           COUNT(*) FILTER (WHERE a.check_out_time IS NOT NULL) AS checked_out
-    FROM attendance a
-    LEFT JOIN attendance_status ast ON a.status_id=ast.id
-    WHERE a.attendance_date_eng = :d
-");
-$att->execute([':d'=>$today]);
-$attStats = $att->fetch(PDO::FETCH_ASSOC);
-
-// Attendance last 7 days for mini-chart
-$attTrend = $conn->query("
-    SELECT attendance_date_eng AS d,
-           COUNT(*) FILTER (WHERE ast.status_code='P') AS present,
-           COUNT(*) FILTER (WHERE ast.status_code='A') AS absent
-    FROM attendance a
-    LEFT JOIN attendance_status ast ON a.status_id=ast.id
-    WHERE a.attendance_date_eng >= CURRENT_DATE - INTERVAL '7 days'
-    GROUP BY attendance_date_eng ORDER BY attendance_date_eng
-")->fetchAll(PDO::FETCH_ASSOC);
-
-// ── ZKTeco ────────────────────────────────────────────────────
-$zk = $conn->query("
-    SELECT device_name, is_active, last_pull_at, last_pull_status, last_pull_records
-    FROM zkteco_devices ORDER BY priority LIMIT 5
-")->fetchAll(PDO::FETCH_ASSOC);
-
 // ── VEHICLES ──────────────────────────────────────────────────
 // vehicles.status is BOOLEAN (true=active, false=inactive)
 $veh = $conn->query("
@@ -135,13 +103,6 @@ $fuelMonth = $conn->query("
     WHERE EXTRACT(MONTH FROM issued_date_eng) = EXTRACT(MONTH FROM CURRENT_DATE)
       AND EXTRACT(YEAR  FROM issued_date_eng) = EXTRACT(YEAR  FROM CURRENT_DATE)
 ")->fetchColumn();
-
-// ── PAYROLL ───────────────────────────────────────────────────
-$payroll = $conn->query("
-    SELECT payroll_code, payroll_month, payroll_year, status,
-           total_employees, total_gross, total_net_payable
-    FROM payroll_processing ORDER BY id DESC LIMIT 1
-")->fetch(PDO::FETCH_ASSOC);
 
 // ── FORMA / CTP / D2M ─────────────────────────────────────────
 $d2mStats = $conn->query("
@@ -173,27 +134,24 @@ $recentDeno = $conn->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // ── Reports quick list ────────────────────────────────────────
+include $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
+
 $reportLinks = [
-    ['icon'=>'bi-graph-up-arrow',       'label'=>'Daily Production',      'url'=>'/deno2/denoreports/daily.php',              'color'=>'#2c3e8c'],
-    ['icon'=>'bi-calendar-month',       'label'=>'Monthly Production',    'url'=>'/deno2/denoreports/monthly.php',            'color'=>'#1a9e5f'],
-    ['icon'=>'bi-book-fill',            'label'=>'Books Report',          'url'=>'/deno2/denoreports/books.php',              'color'=>'#6c5ce7'],
-    ['icon'=>'bi-translate',            'label'=>'Translated Books',      'url'=>'/deno2/denoreports/translated.php',         'color'=>'#00b894'],
-    ['icon'=>'bi-clipboard2-pulse',     'label'=>'Job Ticket vs Printed', 'url'=>'/deno2/denoreports/jobticket_fp.php',       'color'=>'#e8a020'],
-    ['icon'=>'bi-bar-chart-steps',      'label'=>'Process Control',       'url'=>'/deno2/report/production_process_control.php','color'=>'#d63031'],
-    ['icon'=>'bi-graph-up',             'label'=>'Trend Report',          'url'=>'/deno2/report/trend.php',                  'color'=>'#0984e3'],
-    ['icon'=>'bi-file-earmark-bar-graph','label'=>'Reconciliation',       'url'=>'/deno2/report/index.php',                  'color'=>'#636e72'],
-    ['icon'=>'bi-printer',              'label'=>'Forma Printing',        'url'=>'/deno2/formaprinting/index.php',            'color'=>'#74b9ff'],
-    ['icon'=>'bi-box-seam',             'label'=>'Pack & Stitch',         'url'=>'/deno2/bookpacking/index.php',              'color'=>'#fd79a8'],
+    ['icon'=>'bi-graph-up-arrow',       'label'=>'Daily Production',      'url'=>getUrl('denoreports/daily.php'),              'color'=>'#2c3e8c'],
+    ['icon'=>'bi-calendar-month',       'label'=>'Monthly Production',    'url'=>getUrl('denoreports/monthly.php'),            'color'=>'#1a9e5f'],
+    ['icon'=>'bi-book-fill',            'label'=>'Books Report',          'url'=>getUrl('denoreports/books.php'),              'color'=>'#6c5ce7'],
+    ['icon'=>'bi-translate',            'label'=>'Translated Books',      'url'=>getUrl('denoreports/translated.php'),         'color'=>'#00b894'],
+    ['icon'=>'bi-clipboard2-pulse',     'label'=>'Job Ticket vs Printed', 'url'=>getUrl('denoreports/jobticket_fp.php'),       'color'=>'#e8a020'],
+    ['icon'=>'bi-bar-chart-steps',      'label'=>'Process Control',       'url'=>getUrl('report/production_process_control.php'),'color'=>'#d63031'],
+    ['icon'=>'bi-graph-up',             'label'=>'Trend Report',          'url'=>getUrl('report/trend.php'),                   'color'=>'#0984e3'],
+    ['icon'=>'bi-file-earmark-bar-graph','label'=>'Reconciliation',       'url'=>getUrl('report/index.php'),                   'color'=>'#636e72'],
+    ['icon'=>'bi-printer',              'label'=>'Forma Printing',        'url'=>getUrl('formaprinting/index.php'),            'color'=>'#74b9ff'],
+    ['icon'=>'bi-box-seam',             'label'=>'Pack & Stitch',         'url'=>getUrl('bookpacking/index.php'),              'color'=>'#fd79a8'],
 ];
 
 // JSON for charts
 $trendDates = json_encode(array_column($trend, 'd'));
 $trendQty   = json_encode(array_map(fn($r)=>(int)$r['qty'], $trend));
-$attDates   = json_encode(array_column($attTrend, 'd'));
-$attPresent = json_encode(array_map(fn($r)=>(int)$r['present'], $attTrend));
-$attAbsent  = json_encode(array_map(fn($r)=>(int)$r['absent'],  $attTrend));
-
-include $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 ?>
 
 <style>
@@ -259,9 +217,6 @@ body{background:#f0f2f8}
         </div>
         <div class="d-flex gap-2 flex-wrap">
             <a href="<?= getUrl('entries/deno.php') ?>" class="btn btn-sm btn-light fw-semibold"><i class="bi bi-plus-circle me-1"></i>Add Deno</a>
-            <?php if(can_access_module('hr')): ?>
-            <a href="<?= getUrl('hr/modules/payroll/process.php') ?>" class="btn btn-sm btn-warning fw-semibold"><i class="bi bi-cash-stack me-1"></i>Run Payroll</a>
-            <?php endif; ?>
             <a href="<?= getUrl('reports.php') ?>" class="btn btn-sm btn-outline-light fw-semibold"><i class="bi bi-bar-chart me-1"></i>All Reports</a>
         </div>
     </div>
@@ -334,8 +289,8 @@ body{background:#f0f2f8}
     </div>
 </div>
 
-<!-- ══ HR & ATTENDANCE KPIs ══ -->
-<p class="section-label"><i class="bi bi-people-fill me-1"></i>HR & Attendance — <?= date('d M Y') ?></p>
+<!-- ══ HR KPIs ══ -->
+<p class="section-label"><i class="bi bi-people-fill me-1"></i>HR — <?= date('d M Y') ?></p>
 <div class="row g-3 mb-1">
     <div class="col-6 col-md-3 col-xl">
         <div class="kpi c-blue">
@@ -344,26 +299,6 @@ body{background:#f0f2f8}
                 <div class="kpi-lbl">Employees</div>
                 <div class="kpi-val"><?= number_format($emp['active']) ?></div>
                 <div class="kpi-sub"><?= $emp['permanent'] ?> perm · <?= $emp['contract'] ?> contract</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3 col-xl">
-        <div class="kpi c-green">
-            <div class="kpi-icon"><i class="bi bi-person-check"></i></div>
-            <div>
-                <div class="kpi-lbl">Present Today</div>
-                <div class="kpi-val"><?= number_format($attStats['present']) ?></div>
-                <div class="kpi-sub"><?= $attStats['checked_in'] ?> in · <?= $attStats['checked_out'] ?> out</div>
-            </div>
-        </div>
-    </div>
-    <div class="col-6 col-md-3 col-xl">
-        <div class="kpi c-red">
-            <div class="kpi-icon"><i class="bi bi-person-x"></i></div>
-            <div>
-                <div class="kpi-lbl">Absent Today</div>
-                <div class="kpi-val"><?= number_format($attStats['absent']) ?></div>
-                <div class="kpi-sub"><?= $attStats['on_leave'] ?> on leave</div>
             </div>
         </div>
     </div>
@@ -387,16 +322,6 @@ body{background:#f0f2f8}
             </div>
         </div>
     </div>
-    <div class="col-6 col-md-3 col-xl">
-        <div class="kpi c-orange">
-            <div class="kpi-icon"><i class="bi bi-cash-stack"></i></div>
-            <div>
-                <div class="kpi-lbl">Last Payroll</div>
-                <div class="kpi-val"><?= $payroll ? 'NPR '.number_format($payroll['total_net_payable']/1000,0).'K' : '—' ?></div>
-                <div class="kpi-sub"><?= $payroll ? htmlspecialchars($payroll['payroll_code']) : 'No run yet' ?></div>
-            </div>
-        </div>
-    </div>
 </div>
 
 <!-- ══ DETAIL ROWS ══ -->
@@ -411,54 +336,6 @@ body{background:#f0f2f8}
             </div>
             <div class="panel-body" style="padding-bottom:.5rem">
                 <canvas id="prodChart" height="90"></canvas>
-            </div>
-        </div>
-    </div>
-
-    <!-- Attendance Trend Chart -->
-    <div class="col-md-4 col-xl-3">
-        <div class="panel">
-            <div class="panel-hdr">
-                <h6><i class="bi bi-calendar-check me-1" style="color:var(--green)"></i>Attendance (7 Days)</h6>
-                <a href="<?= getUrl('attendance_device/zkteco_index.php') ?>" class="btn btn-xs btn-outline-secondary" style="font-size:.7rem;padding:2px 8px">ZKTeco</a>
-            </div>
-            <div class="panel-body" style="padding-bottom:.5rem">
-                <canvas id="attChart" height="105"></canvas>
-                <div class="d-flex justify-content-center gap-3 mt-2" style="font-size:.68rem">
-                    <span><span class="dot dot-g" style="display:inline-block"></span>Present</span>
-                    <span><span class="dot dot-r" style="display:inline-block"></span>Absent</span>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- ZKTeco Devices -->
-    <div class="col-md-4 col-xl-3">
-        <div class="panel">
-            <div class="panel-hdr">
-                <h6><i class="bi bi-fingerprint me-1" style="color:var(--purple)"></i>Biometric Devices</h6>
-            </div>
-            <div class="panel-body">
-                <?php foreach($zk as $dev): ?>
-                <div class="d-flex justify-content-between align-items-start mb-2 pb-2 border-bottom">
-                    <div>
-                        <span class="dot <?= $dev['is_active'] ? 'dot-g' : 'dot-x' ?>" style="display:inline-block"></span>
-                        <strong style="font-size:.78rem"><?= htmlspecialchars($dev['device_name']) ?></strong><br>
-                        <small class="text-muted ms-3" style="font-size:.68rem">
-                            <?= $dev['last_pull_at'] ? date('d M H:i', strtotime($dev['last_pull_at'])) : 'Never pulled' ?>
-                        </small>
-                    </div>
-                    <div class="text-end">
-                        <span class="badge <?= $dev['last_pull_status']==='SUCCESS' ? 'bg-success' : 'bg-secondary' ?>" style="font-size:.6rem">
-                            <?= $dev['last_pull_status'] ?: 'N/A' ?>
-                        </span><br>
-                        <small class="text-muted" style="font-size:.65rem"><?= number_format($dev['last_pull_records']) ?> rec</small>
-                    </div>
-                </div>
-                <?php endforeach; ?>
-                <a href="<?= getUrl('attendance_device/zkteco_index.php') ?>" class="btn btn-sm btn-outline-primary w-100 mt-1" style="font-size:.74rem">
-                    <i class="bi bi-arrow-repeat"></i> Manage Devices
-                </a>
             </div>
         </div>
     </div>
@@ -612,14 +489,13 @@ body{background:#f0f2f8}
             <div class="panel-body">
                 <?php
                 $actions = [
-                    ['icon'=>'bi-plus-circle-fill',   'label'=>'Add Deno Entry',       'url'=>'/deno2/entries/deno.php',                    'color'=>'#2c3e8c','btn'=>'btn-primary'],
-                    ['icon'=>'bi-ticket-perforated-fill','label'=>'New Job Ticket',     'url'=>'/deno2/jobticket/index.php',                 'color'=>'#e8a020','btn'=>'btn-warning'],
-                    ['icon'=>'bi-people-fill',         'label'=>'Employee Directory',   'url'=>'/deno2/hr/employee/index.php',               'color'=>'#1a9e5f','btn'=>'btn-success'],
-                    ['icon'=>'bi-calendar-check',      'label'=>'Mark Attendance',      'url'=>'/deno2/hr/modules/attendance/mark.php',      'color'=>'#0984e3','btn'=>'btn-info'],
-                    ['icon'=>'bi-truck-flatbed',       'label'=>'Vehicle Daily Log',    'url'=>'/deno2/vehicle/vehicle_daily_log_v2.php',    'color'=>'#d63031','btn'=>'btn-danger'],
-                    ['icon'=>'bi-fuel-pump-fill',      'label'=>'Issue Fuel Coupon',    'url'=>'/deno2/vehicle/fuel_coupons_v2.php',         'color'=>'#6c5ce7','btn'=>'btn-secondary'],
-                    ['icon'=>'bi-arrow-right-square',  'label'=>'D2M Verification',     'url'=>'/deno2/d2m/index.php',                       'color'=>'#00b894','btn'=>'btn-outline-success'],
-                    ['icon'=>'bi-printer-fill',        'label'=>'Forma Printing',       'url'=>'/deno2/formaprinting/index.php',             'color'=>'#636e72','btn'=>'btn-outline-secondary'],
+                    ['icon'=>'bi-plus-circle-fill',   'label'=>'Add Deno Entry',       'url'=>getUrl('entries/deno.php'),                    'color'=>'#2c3e8c','btn'=>'btn-primary'],
+                    ['icon'=>'bi-ticket-perforated-fill','label'=>'New Job Ticket',     'url'=>getUrl('jobticket/index.php'),                 'color'=>'#e8a020','btn'=>'btn-warning'],
+                    ['icon'=>'bi-people-fill',         'label'=>'Employee Directory',   'url'=>getUrl('hr/employee/index.php'),               'color'=>'#1a9e5f','btn'=>'btn-success'],
+                    ['icon'=>'bi-truck-flatbed',       'label'=>'Vehicle Daily Log',    'url'=>getUrl('vehicle/vehicle_daily_log_v2.php'),    'color'=>'#d63031','btn'=>'btn-danger'],
+                    ['icon'=>'bi-fuel-pump-fill',      'label'=>'Issue Fuel Coupon',    'url'=>getUrl('vehicle/fuel_coupons_v2.php'),         'color'=>'#6c5ce7','btn'=>'btn-secondary'],
+                    ['icon'=>'bi-arrow-right-square',  'label'=>'D2M Verification',     'url'=>getUrl('d2m/index.php'),                       'color'=>'#00b894','btn'=>'btn-outline-success'],
+                    ['icon'=>'bi-printer-fill',        'label'=>'Forma Printing',       'url'=>getUrl('formaprinting/index.php'),             'color'=>'#636e72','btn'=>'btn-outline-secondary'],
                 ];
                 foreach($actions as $a): ?>
                 <a href="<?= $a['url'] ?>" class="rlink">
@@ -662,36 +538,6 @@ new Chart(document.getElementById('prodChart'), {
         scales: {
             x: { grid: { display: false }, ticks: { font: { size: 10 } } },
             y: { grid: { color: '#f0f2f8' }, ticks: { font: { size: 10 } } }
-        }
-    }
-});
-
-// ── Attendance Trend ──────────────────────────────────────────
-new Chart(document.getElementById('attChart'), {
-    type: 'line',
-    data: {
-        labels: <?= $attDates ?>,
-        datasets: [
-            {
-                label: 'Present',
-                data: <?= $attPresent ?>,
-                borderColor: '#1a9e5f', backgroundColor: 'rgba(26,158,95,.12)',
-                fill: true, tension: .35, pointRadius: 3,
-            },
-            {
-                label: 'Absent',
-                data: <?= $attAbsent ?>,
-                borderColor: '#d63031', backgroundColor: 'rgba(214,48,49,.08)',
-                fill: true, tension: .35, pointRadius: 3,
-            }
-        ]
-    },
-    options: {
-        responsive: true, maintainAspectRatio: true,
-        plugins: { legend: { display: false } },
-        scales: {
-            x: { grid: { display: false }, ticks: { font: { size: 9 } } },
-            y: { grid: { color: '#f0f2f8' }, ticks: { font: { size: 9 } } }
         }
     }
 });
