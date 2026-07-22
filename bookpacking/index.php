@@ -684,7 +684,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     </a>
                 </div>
                 <div>
-                    <?php if (has_role('incharge') || has_role('supervisor') || has_role('admin')): ?>
+                    <?php if (has_role('incharge') || has_role('supervisor') || has_role('operator') || has_role('admin')): ?>
                         <a href="create.php" class="btn btn-success">
                             <i class="fas fa-plus"></i> Create New Packing
                         </a>

@@ -4,7 +4,7 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Check permissions
-if (!has_role('incharge') && !has_role('supervisor') && !has_role('admin')) {
+if (!has_role('incharge') && !has_role('operator') && !has_role('supervisor') && !has_role('admin')) {
     ob_end_clean();
     header('Location: /deno2/unauthorized.php');
     exit();
