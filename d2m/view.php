@@ -13,7 +13,7 @@ if (!$d2m_id) {
 // Fetch D2M record with related data
 $stmt = $conn->prepare("
     SELECT d.*, 
-           fy.fiscal_code as fiscal_year_name,
+           fy.fiscal_name as fiscal_year_name,
            u_created.username as created_by_name,
            u_checked.username as checked_by_name,
            u_verified.username as verified_by_name

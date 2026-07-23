@@ -1,6 +1,7 @@
 <?php
  ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Check permissions
@@ -13,7 +14,10 @@ if (!has_role('supervisor') && !has_role('incharge') && !has_role('admin') && !h
 // Get search parameters
 $search = $_GET['search'] ?? '';
 $book_code = $_GET['book_code'] ?? '';
-$fiscal_year_id = $_GET['fiscal_year_id'] ?? '';
+// Defaults to the active fiscal year on first load; isset() so an explicit
+// "All Fiscal Years" choice (empty string) sticks.
+$active_fy_for_filter = getActiveFiscalYear($conn);
+$fiscal_year_id = isset($_GET['fiscal_year_id']) ? $_GET['fiscal_year_id'] : ($active_fy_for_filter['id'] ?? '');
 $packing_status = $_GET['packing_status'] ?? '';
 $date_from = $_GET['date_from'] ?? '';
 $date_to = $_GET['date_to'] ?? '';
@@ -90,6 +94,7 @@ $main_query = "
         b.book_code as book_code_full,
         b.class_level,
         fy.fiscal_code,
+        fy.fiscal_name,
         u_supervisor.username as supervisor_name,
         u_incharge.username as incharge_name,
         u_operator.username as operator_name,
@@ -117,7 +122,7 @@ $stmt->execute();
 $packing_records = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 // Get filter options
-$fiscal_years = $conn->query("SELECT id, fiscal_code FROM fiscal_years ORDER BY fiscal_code DESC")->fetchAll(PDO::FETCH_ASSOC);
+$fiscal_years = $conn->query("SELECT id, fiscal_code, fiscal_name, is_active FROM fiscal_years ORDER BY fiscal_code DESC")->fetchAll(PDO::FETCH_ASSOC);
 $book_codes = $conn->query("
     SELECT DISTINCT bp.book_code 
     FROM book_packing bp 
@@ -633,7 +638,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         <option value="">All Fiscal Years</option>
                         <?php foreach ($fiscal_years as $fy): ?>
                             <option value="<?= $fy['id'] ?>" <?= $fiscal_year_id == $fy['id'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($fy['fiscal_code']) ?>
+                                <?= htmlspecialchars($fy['fiscal_name'] ?? $fy['fiscal_code']) ?><?= $fy['is_active'] ? ' (Active)' : '' ?>
                             </option>
                         <?php endforeach; ?>
                     </select>
@@ -729,6 +734,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     <thead>
                         <tr>
                             <th>S.N.</th>
+                            <th>Packing No.</th>
                             <th>Record Name</th>
                             <th>Job Ticket</th>
                             <th>Book Information</th>
@@ -744,7 +750,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                         <?php foreach ($packing_records as $index => $record): ?>
                             <tr id="row-<?= $record['id'] ?>">
                                 <td><?= $offset + $index + 1 ?></td>
-                                
+
+                                <td>
+                                    <span style="font-weight: 600; color: #007bff;">
+                                        <?= htmlspecialchars($record['packing_no'] ?? '-') ?>
+                                    </span>
+                                </td>
+
                                 <td>
                                     <div style="font-weight: 600; color: #495057;">
                                         <?= htmlspecialchars($record['name']) ?>
@@ -816,7 +828,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                                 
                                 <td>
                                     <span style="font-weight: 500; color: #495057;">
-                                        <?= htmlspecialchars($record['fiscal_code']) ?>
+                                        <?= htmlspecialchars($record['fiscal_name'] ?? $record['fiscal_code']) ?>
                                     </span>
                                 </td>
                                 

@@ -14,7 +14,7 @@ $id = intval($_GET['id']);
 
 // Get job ticket with details using direct queries
 $stmt = $conn->prepare("
-    SELECT j.*, b.book_code, b.book_name, b.class_level, fy.fiscal_code
+    SELECT j.*, b.book_code, b.book_name, b.class_level, fy.fiscal_code, fy.fiscal_name
     FROM job_ticket j
     JOIN books b ON j.book_id = b.book_id
     JOIN fiscal_years fy ON j.fiscal_year_id = fy.id
@@ -192,7 +192,7 @@ $lotDisplay = rtrim($lotDisplay, ' | ');
         </div>
         <div class="ticket-info-row">
             <span class="ticket-label">शैक्षिक सत्र:</span>
-            <span><?= htmlspecialchars(intval($ticket['fiscal_code']) + 1) ?></span>
+            <span><?= htmlspecialchars($ticket['fiscal_name'] ?? $ticket['fiscal_code']) ?></span>
         </div>
         <div class="ticket-info-row">
             <span class="ticket-label">कक्षा:</span>

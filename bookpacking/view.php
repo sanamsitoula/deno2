@@ -32,6 +32,7 @@ $query = "
        -- b.subject,
        -- b.publisher,
         fy.fiscal_code,
+        fy.fiscal_name,
         u_supervisor.username as supervisor_name,
      --   u_supervisor.full_name as supervisor_full_name,
         u_incharge.username as incharge_name,
@@ -401,10 +402,15 @@ $completion_percentage = ($packing['jt_total_qty'] > 0) ?
                         <div class="info-label">Record Name</div>
                         <div class="info-value large"><?= htmlspecialchars($packing['name']) ?></div>
                     </div>
-                    
+
+                    <div class="info-item">
+                        <div class="info-label">Packing No.</div>
+                        <div class="info-value large" style="color: #007bff;"><?= htmlspecialchars($packing['packing_no'] ?? '-') ?></div>
+                    </div>
+
                     <div class="info-item">
                         <div class="info-label">Fiscal Year</div>
-                        <div class="info-value"><?= htmlspecialchars($packing['fiscal_code']) ?></div>
+                        <div class="info-value"><?= htmlspecialchars($packing['fiscal_name'] ?? $packing['fiscal_code']) ?></div>
                     </div>
                     
                     <div class="info-item">

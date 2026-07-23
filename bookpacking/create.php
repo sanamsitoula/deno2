@@ -1,6 +1,7 @@
 <?php
 ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Check permissions
@@ -42,16 +43,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             throw new Exception("Total packed quantity ({$total_packed} + {$p_qty}) exceeds print quantity ({$jt_print_qty}).");
         }
 
+        // Fiscal-year-scoped packing number: "{serial}/BP/{fiscalShort}" — resets
+        // to 1 for each new fiscal year (see plan_numberseries.md).
+        $fy_stmt = $conn->prepare("SELECT id, fiscal_code, fiscal_name FROM fiscal_years WHERE id = :fy");
+        $fy_stmt->execute([':fy' => $_POST['fiscal_year_id']]);
+        $fy_row = $fy_stmt->fetch(PDO::FETCH_ASSOC);
+        if (!$fy_row) {
+            throw new Exception("Invalid fiscal year selected.");
+        }
+        [$packing_serial_no, $packing_no] = generateFiscalScopedNumber(
+            $conn, 'book_packing', 'packing_serial_no', $fy_row['id'], 'BP', $fy_row
+        );
+
         // Insert packing record
         $insert_sql = "
             INSERT INTO book_packing (
                 name, jt_id, jt_print_qty, p_qty, book_code, date_nep, date_eng,
                 supervisor_id, incharge_id, operator_id, status, packing_status,
-                created_by, fiscal_year_id, remarks, description
+                created_by, fiscal_year_id, remarks, description,
+                packing_serial_no, packing_no
             ) VALUES (
                 :name, :jt_id, :jt_print_qty, :p_qty, :book_code, :date_nep, :date_eng,
                 :supervisor_id, :incharge_id, :operator_id, true, :packing_status,
-                :created_by, :fiscal_year_id, :remarks, :description
+                :created_by, :fiscal_year_id, :remarks, :description,
+                :packing_serial_no, :packing_no
             )
         ";
 
@@ -71,7 +86,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ':created_by' => $_SESSION['user_id'],
             ':fiscal_year_id' => $_POST['fiscal_year_id'],
             ':remarks' => $_POST['remarks'] ?? null,
-            ':description' => $_POST['description'] ?? null
+            ':description' => $_POST['description'] ?? null,
+            ':packing_serial_no' => $packing_serial_no,
+            ':packing_no' => $packing_no
         ]);
 
         $packing_id = $conn->lastInsertId();

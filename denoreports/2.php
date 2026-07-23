@@ -7,9 +7,10 @@ if (isset($_GET['export'])) {
     if (ob_get_length()) ob_clean();
 
     require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+    require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 
-    // Input sanitization and defaults
-    $year = $_GET['year'] ?? '2082';
+    // Input sanitization and defaults — year follows the active fiscal year
+    $year = $_GET['year'] ?? (getActiveFiscalYear($conn)['fiscal_code'] ?? '2082');
     $month = $_GET['month'] ?? '05';
     $report_type = $_GET['report_type'] ?? 'production';
     $translation = $_GET['translation'] ?? 'all';
@@ -243,10 +244,12 @@ if (ob_get_length()) ob_end_clean();
 
 // Regular page load
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Same input handling as above (you could refactor into a function)
-$year = $_GET['year'] ?? '2082';
+// year follows the active fiscal year
+$year = $_GET['year'] ?? (getActiveFiscalYear($conn)['fiscal_code'] ?? '2082');
 $month = $_GET['month'] ?? '05';
 $report_type = $_GET['report_type'] ?? 'production';
 $translation = $_GET['translation'] ?? 'all';

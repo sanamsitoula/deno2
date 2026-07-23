@@ -32,6 +32,9 @@ $details = getJobTicketDetails($conn, $id);
 
 // Get fiscal year info
 $fiscalYearId = $ticket['fiscal_year_id'];
+$fyStmt = $conn->prepare("SELECT fiscal_code, fiscal_name FROM fiscal_years WHERE id = ?");
+$fyStmt->execute([$fiscalYearId]);
+$fiscalYearRow = $fyStmt->fetch();
 
 // Get lot history - PostgreSQL compatible version
 function getLotHistory($conn, $bookId, $fiscalYearId) {
@@ -348,6 +351,11 @@ body {
                                 <?php endforeach; ?>
                             </select>
                             <input type="hidden" name="book_id" value="<?= $ticket['book_id'] ?>">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Fiscal Year</label>
+                            <input type="text" class="form-control bg-light" readonly
+                                value="<?= htmlspecialchars($fiscalYearRow['fiscal_name'] ?? $fiscalYearRow['fiscal_code'] ?? '') ?>">
                         </div>
                         <div class="mb-3">
                             <label for="lot" class="form-label">Lot No</label>

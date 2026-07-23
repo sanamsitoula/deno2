@@ -195,6 +195,9 @@ if ($filter_date) {
         ORDER BY d.created_at DESC LIMIT 20
     ")->fetchAll(PDO::FETCH_ASSOC);
 }
+
+// Active fiscal year, for display only (numbering itself is generated on submit)
+$active_fy_row = $conn->query("SELECT fiscal_code, fiscal_name FROM fiscal_years WHERE is_active = true LIMIT 1")->fetch(PDO::FETCH_ASSOC);
 ?>
 
 <!-- Nepali Datepicker v5 CSS -->
@@ -269,8 +272,9 @@ if ($filter_date) {
 
 <div class="container mt-4">
     <div class="card shadow">
-        <div class="card-header bg-primary text-white">
+        <div class="card-header bg-primary text-white d-flex justify-content-between align-items-center">
             <h5 class="mb-0">📋 Create Deno to Marketing (D2M) - Each DENO Separate</h5>
+            <span class="badge bg-light text-primary">Fiscal Year: <?= htmlspecialchars($active_fy_row['fiscal_name'] ?? $active_fy_row['fiscal_code'] ?? 'N/A') ?></span>
         </div>
 
         <div class="card-body">

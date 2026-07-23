@@ -1,5 +1,6 @@
 <?php
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Handle status update
@@ -75,9 +76,11 @@ $records_per_page = 50;
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $offset = ($page - 1) * $records_per_page;
 
-$current_nepali_year = '2082';
-$start_date = isset($_GET['start_date']) ? $_GET['start_date'] : $current_nepali_year . '.04.01';
-$end_date = isset($_GET['end_date']) ? $_GET['end_date'] : ($current_nepali_year + 1) . '.03.32';
+// Default date range follows whichever fiscal year is currently active
+// (config/functions.php::getActiveFiscalDateRange) — no hardcoded year.
+$active_fy_range = getActiveFiscalDateRange($conn);
+$start_date = isset($_GET['start_date']) ? $_GET['start_date'] : $active_fy_range['start'];
+$end_date = isset($_GET['end_date']) ? $_GET['end_date'] : $active_fy_range['end'];
 
 $search_params = [
     'd2m_no' => $_GET['d2m_no'] ?? '',
@@ -99,7 +102,7 @@ $count_query = "
 
 $query = "
     SELECT d.*, 
-           fy.fiscal_code as fiscal_year_name,
+           fy.fiscal_name as fiscal_year_name,
            u_created.username as created_by_name,
            u_checked.username as checked_by_name,
            u_verified.username as verified_by_name,
@@ -160,7 +163,7 @@ $bind_params[':end_date'] = $search_params['end_date'];
 
 $count_query .= $conditions;
 $query .= $conditions;
-$query .= " GROUP BY d.id, fy.fiscal_code, u_created.username, u_checked.username, u_verified.username";
+$query .= " GROUP BY d.id, fy.fiscal_name, u_created.username, u_checked.username, u_verified.username";
 
 $count_stmt = $conn->prepare($count_query);
 foreach ($bind_params as $key => $value) {

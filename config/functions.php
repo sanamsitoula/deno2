@@ -21,16 +21,94 @@ if (!function_exists('detect_deno2_base_url')) {
 }
 
 // --- Utility Functions ---
-function generateJobTicketCode($conn, $fiscalYearId) {
-    $fyCode = $conn->query("SELECT fiscal_code FROM fiscal_years WHERE id = $fiscalYearId")->fetchColumn();
-    $count = $conn->query("SELECT COUNT(*) FROM job_ticket WHERE fiscal_year_id = $fiscalYearId")->fetchColumn();
-    $seq = str_pad($count + 1, 3, '0', STR_PAD_LEFT);
-    return "$fyCode-JT$seq";
+if (!function_exists('generateJobTicketCode')) {
+    function generateJobTicketCode($conn, $fiscalYearId) {
+        $fyCode = $conn->query("SELECT fiscal_code FROM fiscal_years WHERE id = " . (int)$fiscalYearId)->fetchColumn();
+        // MAX()-based (not COUNT()) so a deleted job_ticket row never causes a
+        // duplicate code — resets to 1 automatically per fiscal_year_id since a
+        // new fiscal year has no rows yet.
+        $stmt = $conn->prepare("
+            SELECT COALESCE(MAX(CAST(SUBSTRING(job_ticket_code FROM 'JT(\\d+)$') AS INTEGER)), 0) + 1
+            FROM job_ticket WHERE fiscal_year_id = :fy
+        ");
+        $stmt->execute([':fy' => $fiscalYearId]);
+        $next = (int)$stmt->fetchColumn();
+        $seq = str_pad($next, 3, '0', STR_PAD_LEFT);
+        return "$fyCode-JT$seq";
+    }
 }
 
-function getFiscalYearId($conn) {
-    $fiscalStmt = $conn->query("SELECT id FROM fiscal_years WHERE is_active = TRUE LIMIT 1");
-    return $fiscalStmt->fetchColumn();
+if (!function_exists('getFiscalYearId')) {
+    function getFiscalYearId($conn) {
+        $fiscalStmt = $conn->query("SELECT id FROM fiscal_years WHERE is_active = TRUE LIMIT 1");
+        return $fiscalStmt->fetchColumn();
+    }
+}
+
+// Full active fiscal_years row (id, fiscal_code, fiscal_name, start_date, end_date)
+// — the one place every module/report should pull the active fiscal year from,
+// so fiscal_name is always displayed consistently everywhere.
+if (!function_exists('getActiveFiscalYear')) {
+    function getActiveFiscalYear($conn) {
+        $stmt = $conn->query("SELECT id, fiscal_code, fiscal_name, start_date, end_date FROM fiscal_years WHERE is_active = TRUE LIMIT 1");
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        return $row ?: null;
+    }
+}
+
+// Short fiscal label used inside number-series strings, e.g. "2082-83" -> "82-83".
+// Accepts either a fiscal_years row (array) or a fiscal_name/fiscal_code string.
+if (!function_exists('getFiscalShort')) {
+    function getFiscalShort($fiscalYear) {
+        $name = is_array($fiscalYear)
+            ? ($fiscalYear['fiscal_name'] ?? $fiscalYear['fiscal_code'] ?? '')
+            : (string)$fiscalYear;
+        if ($name === '') return '';
+        if (preg_match('/^\d{2}(\d{2})[\/\-](\d{2,4})$/', $name, $m)) {
+            $endShort = strlen($m[2]) === 4 ? substr($m[2], 2) : $m[2];
+            return $m[1] . '-' . $endShort;
+        }
+        return str_replace('/', '-', $name);
+    }
+}
+
+// Default BS date range (Shrawan 1 → next Ashadh end) for the active fiscal
+// year, e.g. fiscal_code "2082" -> ['start' => '2082.04.01', 'end' => '2083.03.32'].
+// Used so every module's index/list page defaults its date-range filter to
+// whichever fiscal year is currently active, instead of a hardcoded year.
+if (!function_exists('getActiveFiscalDateRange')) {
+    function getActiveFiscalDateRange($conn) {
+        $fy = getActiveFiscalYear($conn);
+        $code = $fy['fiscal_code'] ?? '2082';
+        return [
+            'start'          => $code . '.04.01',
+            'end'            => ((int)$code + 1) . '.03.32',
+            'fiscal_code'    => $code,
+            'fiscal_year_id' => $fy['id'] ?? null,
+        ];
+    }
+}
+
+// Generic fiscal-year-scoped "next number" generator: MAX(serialColumn)+1,
+// scoped to fiscal_year_id (and any extra WHERE columns), formatted as
+// "{serial}/{moduleCode}/{fiscalShort}" per plan_numberseries.md.
+// $table/$serialColumn are developer-supplied constants, never user input.
+if (!function_exists('generateFiscalScopedNumber')) {
+    function generateFiscalScopedNumber($conn, $table, $serialColumn, $fiscalYearId, $moduleCode, $fiscalYear, array $extraWhere = []) {
+        $where = "fiscal_year_id = :fy";
+        $params = [':fy' => $fiscalYearId];
+        foreach ($extraWhere as $col => $val) {
+            $ph = ':' . $col;
+            $where .= " AND $col = $ph";
+            $params[$ph] = $val;
+        }
+        $stmt = $conn->prepare("SELECT COALESCE(MAX($serialColumn), 0) + 1 FROM $table WHERE $where");
+        $stmt->execute($params);
+        $serial = (int)$stmt->fetchColumn();
+        $short = getFiscalShort($fiscalYear);
+        $formatted = "{$serial}/{$moduleCode}/{$short}";
+        return [$serial, $formatted];
+    }
 }
 
 function getStatusBadge($status) {
@@ -80,7 +158,7 @@ function getJobTicketDetails($conn, $jobTicketId) {
 function getJobTicketWithDetails($conn, $id) {
     $ticket = $conn->query("
         SELECT j.*, b.book_name, b.book_code, b.class_level, u.username as created_by_name,
-               fy.fiscal_code, j.fiscal_year_id
+               fy.fiscal_code, fy.fiscal_name, j.fiscal_year_id
         FROM job_ticket j
         JOIN books b ON j.book_id = b.book_id
         JOIN users u ON j.created_by = u.id

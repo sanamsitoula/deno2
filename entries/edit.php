@@ -104,12 +104,14 @@ try {
     $stmt = $conn->prepare("
         SELECT d.*,
                b.book_name, b.class_level,
+               fy.fiscal_name,
                u1.username AS created_user,
                u2.username AS received_user,
                u3.username AS verified_user,
                u4.username AS sender_user
         FROM deno d
         LEFT JOIN books b  ON d.book_code   = b.book_code
+        LEFT JOIN fiscal_years fy ON d.fiscal_year_id = fy.id
         LEFT JOIN users u1 ON d.created_by  = u1.id
         LEFT JOIN users u2 ON d.received_by = u2.id
         LEFT JOIN users u3 ON d.verify_by   = u3.id
@@ -285,6 +287,8 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
         Book: <strong><?= htmlspecialchars($record['book_name']) ?></strong>
         (<?= htmlspecialchars($record['book_code']) ?>) &nbsp;|&nbsp;
         Ref: <strong><?= htmlspecialchars($record['ref_no']) ?></strong> &nbsp;|&nbsp;
+        Deno No: <strong><?= htmlspecialchars($record['deno_no'] ?? '—') ?></strong> &nbsp;|&nbsp;
+        Fiscal Year: <strong><?= htmlspecialchars($record['fiscal_name'] ?? '—') ?></strong> &nbsp;|&nbsp;
         Nepali Date: <strong><?= htmlspecialchars($record['deno_date_nep']) ?></strong><br>
         Created by: <strong><?= htmlspecialchars($record['created_user'] ?? '—') ?></strong> &nbsp;|&nbsp;
         Last updated: <strong><?= $record['updated_at'] ? date('Y-m-d H:i', strtotime($record['updated_at'])) : 'Never' ?></strong>

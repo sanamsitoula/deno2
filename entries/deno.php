@@ -1,6 +1,7 @@
 <?php
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/lib/AuditLogger.php';
 
 if (session_status() === PHP_SESSION_NONE) {
@@ -54,7 +55,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
 
     echo "<table border='1'>";
     echo "<tr>
-            <th>ID</th><th>Book Name</th><th>Book Code</th><th>Ref No</th>
+            <th>ID</th><th>Deno No</th><th>Book Name</th><th>Book Code</th><th>Ref No</th>
             <th>Nepali Date</th><th>English Date</th><th>Fiscal Year</th>
             <th>Per Poka Qty</th><th>Poka Qty</th><th>Total Qty</th><th>Open Pcs</th>
             <th>Created By</th><th>Sender By</th><th>Received By</th>
@@ -63,6 +64,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
     foreach ($records as $r) {
         echo "<tr>
             <td>{$r['id']}</td>
+            <td>" . htmlspecialchars($r['deno_no'] ?? '') . "</td>
             <td>" . htmlspecialchars($r['book_name']) . "</td>
             <td>{$r['book_code']}</td>
             <td>{$r['ref_no']}</td>
@@ -119,16 +121,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     exit;
                 }
 
-                // deno_year / fiscal_year are set by the trigger from deno_date_nep
+                // deno_year / fiscal_year (legacy free-text) are set by the trigger from deno_date_nep.
+                // deno_no is a NEW, separate, fiscal-year-scoped number: "{serial}/deno/{fiscalShort}"
+                // — ref_no above stays fully manual/untouched (see plan_numberseries.md).
+                $active_fy = getActiveFiscalYear($conn);
+                if (!$active_fy) {
+                    $_SESSION['flash'] = [
+                        'type' => 'danger',
+                        'msg'  => 'No active fiscal year set. Please configure an active fiscal year first.',
+                    ];
+                    header('Location: ' . $_SERVER['PHP_SELF']);
+                    exit;
+                }
+                [$deno_serial_no, $deno_no] = generateFiscalScopedNumber(
+                    $conn, 'deno', 'deno_serial_no', $active_fy['id'], 'deno', $active_fy
+                );
+
                 $conn->prepare("
                     INSERT INTO deno
                         (book_code, ref_no, deno_date_nep, deno_date_eng,
                          per_poka_qty, poka_qty, quantity_openpcs, notes,
-                         created_by, sender_by, received_by, verify_by, update_remarks)
+                         created_by, sender_by, received_by, verify_by, update_remarks,
+                         fiscal_year_id, deno_serial_no, deno_no)
                     VALUES
                         (:book_code, :ref_no, :deno_date_nep, :deno_date_eng,
                          :per_poka_qty, :poka_qty, :quantity_openpcs, :notes,
-                         :created_by, :sender_by, :received_by, :verify_by, :update_remarks)
+                         :created_by, :sender_by, :received_by, :verify_by, :update_remarks,
+                         :fiscal_year_id, :deno_serial_no, :deno_no)
                 ")->execute([
                     ':book_code'        => $_POST['book_code'],
                     ':ref_no'           => $_POST['ref_no'],
@@ -143,9 +162,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ':received_by'      => $_POST['received_by'] ?: null,
                     ':verify_by'        => $_POST['verify_by']   ?: null,
                     ':update_remarks'   => $_POST['update_remarks'],
+                    ':fiscal_year_id'   => $active_fy['id'],
+                    ':deno_serial_no'   => $deno_serial_no,
+                    ':deno_no'          => $deno_no,
                 ]);
 
-                $_SESSION['flash'] = ['type' => 'success', 'msg' => 'Deno record added successfully!'];
+                $_SESSION['flash'] = ['type' => 'success', 'msg' => "Deno record added successfully! Deno No: $deno_no"];
                 header('Location: index.php');
                 exit;
 
@@ -556,6 +578,7 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
         <thead>
             <tr>
                 <th>ID</th>
+                <th>Deno No</th>
                 <th>Book</th>
                 <th>Ref No</th>
                 <th>Nepali Date</th>
@@ -575,6 +598,7 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
         <?php foreach ($deno_records as $rec): ?>
             <tr>
                 <td><?= $rec['id'] ?></td>
+                <td><span style="font-weight:600;color:#007bff;"><?= htmlspecialchars($rec['deno_no'] ?? '-') ?></span></td>
                 <td><?= htmlspecialchars($rec['book_name'] ?? '') ?></td>
                 <td><?= htmlspecialchars($rec['ref_no']) ?></td>
                 <td><?= htmlspecialchars($rec['deno_date_nep']) ?></td>
@@ -603,7 +627,7 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
             </tr>
         <?php endforeach; ?>
         <?php if (empty($deno_records)): ?>
-            <tr><td colspan="14" style="text-align:center;color:#888;padding:24px;">No records found.</td></tr>
+            <tr><td colspan="15" style="text-align:center;color:#888;padding:24px;">No records found.</td></tr>
         <?php endif; ?>
         </tbody>
     </table>

@@ -53,7 +53,12 @@ SET PGPASSWORD=Nepal@123
 psql -U postgres -d press_jemc -f sql/migrations/001_employee_payroll_columns.sql
 psql -U postgres -d press_jemc -f sql/migrations/002_payroll_tax_tables.sql
 psql -U postgres -d press_jemc -f sql/migrations/002b_create_payroll_tables.sql
+psql -U postgres -d press_jemc -f sql/migrations/003_dynamic_salary_system.sql
+psql -U postgres -d press_jemc -f sql/migrations/004_leave_types_and_hajiri.sql
 ```
+> `003` adds `salary_grades`/`employee_salary.grade_id` (needed by `hr/reports/talab_report.php`).
+> `004` adds `leave_balance.carried_forward` (needed by `hr/reports/hajiri_vivaran.php`).
+> If you see `relation "employee_salary" does not exist` or `column lb_home.carried_forward does not exist`, it means 003/004 haven't been run yet on that database — run them, no code changes needed.
 
 ### Step 5 — Open the app
 ```
@@ -359,7 +364,7 @@ max_execution_time = 300
 - [x] `src/Payroll/` — PayrollRepository, PayrollService, PayslipGenerator
 - [x] `src/Vehicle/` — VehicleRepository, FuelService
 - [x] `api/v1/` — employees, attendance, payroll endpoints
-- [x] DB migrations 001, 002, 002b applied to `press_jemc`
+- [x] DB migrations 001, 002, 002b, 003, 004 applied to `press_jemc` (local)
 - [x] Nepal FY 2081/82 tax slabs seeded
 - [x] `index.php` — Full management dashboard with charts
 - [x] Nav bug fixed (HR links no longer point to Vehicle URLs)

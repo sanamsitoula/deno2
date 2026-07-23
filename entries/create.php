@@ -2,6 +2,7 @@
 ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/lib/AuditLogger.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
@@ -76,21 +77,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             if ($check_stmt->fetch()) {
                 throw new Exception("Reference number " . htmlspecialchars($_POST['ref_no']) . " already exists with a different date.");
             }
-            
+
+            // Fiscal-year-scoped display number: "{serial}/deno/{fiscalShort}" —
+            // NEW, separate from ref_no (which stays manual/user-typed, unchanged).
+            // Resets to 1 for each new fiscal year (see plan_numberseries.md).
+            $active_fy = getActiveFiscalYear($conn);
+            if (!$active_fy) {
+                throw new Exception("No active fiscal year set. Please configure an active fiscal year.");
+            }
+            [$deno_serial_no, $deno_no] = generateFiscalScopedNumber(
+                $conn, 'deno', 'deno_serial_no', $active_fy['id'], 'deno', $active_fy
+            );
+
             $insert_sql = "
                 INSERT INTO deno (
                     book_code, ref_no, deno_date_nep, deno_date_eng,
                     per_poka_qty, poka_qty, quantity_openpcs, notes,
                     created_by, received_by, verify_by, update_remarks, fiscal_year,
-                    entry_type, jt_id, bp_id
+                    entry_type, jt_id, bp_id, fiscal_year_id, deno_serial_no, deno_no
                 ) VALUES (
                     :book_code, :ref_no, :deno_date_nep, :deno_date_eng,
                     :per_poka_qty, :poka_qty, :quantity_openpcs, :notes,
                     :created_by, :received_by, :verify_by, :update_remarks, :fiscal_year,
-                    :entry_type, :jt_id, :bp_id
+                    :entry_type, :jt_id, :bp_id, :fiscal_year_id, :deno_serial_no, :deno_no
                 )
             ";
-            
+
             $stmt = $conn->prepare($insert_sql);
             $stmt->execute([
                 ':book_code' => $book_code,
@@ -108,10 +120,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':fiscal_year' => $_POST['fiscal_year'] ?? '2082',
                 ':entry_type' => $entry_type,
                 ':jt_id' => $jt_id,
-                ':bp_id' => $bp_id
+                ':bp_id' => $bp_id,
+                ':fiscal_year_id' => $active_fy['id'],
+                ':deno_serial_no' => $deno_serial_no,
+                ':deno_no' => $deno_no
             ]);
-            
-            $success_message = "Deno record created successfully!";
+
+            $success_message = "Deno record created successfully! Deno No: $deno_no";
             
         } elseif ($action === 'update') {
             // Similar validation for updates
@@ -202,9 +217,22 @@ $book_packings = $conn->query("
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 // Fetch latest Deno records
+// (v_deno_full_details view doesn't exist on this DB — built directly instead)
 $deno_records = $conn->query("
-    SELECT * FROM v_deno_full_details
-    ORDER BY created_at DESC 
+    SELECT
+        d.id AS deno_id, d.ref_no, d.deno_no, d.entry_type, d.book_code,
+        b.book_name, d.deno_date_nep, d.total_qty, d.created_by,
+        jt.job_ticket_code, bp.name AS bp_name,
+        dm.d2m_no, dm.status AS d2m_status,
+        d.fiscal_year_id, fy.fiscal_name
+    FROM deno d
+    LEFT JOIN books b ON b.book_code = d.book_code
+    LEFT JOIN job_ticket jt ON d.jt_id = jt.id
+    LEFT JOIN book_packing bp ON d.bp_id = bp.id
+    LEFT JOIN d2m dm ON d.d2m_id = dm.id
+    LEFT JOIN fiscal_years fy ON d.fiscal_year_id = fy.id
+    WHERE d.deleted_at IS NULL
+    ORDER BY d.created_at DESC
     LIMIT 20
 ")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -802,7 +830,9 @@ body {
             <thead>
                 <tr>
                     <th>ID</th>
+                    <th>Deno No</th>
                     <th>Ref No</th>
+                    <th>Fiscal Year</th>
                     <th>Type</th>
                     <th>Book</th>
                     <th>JT/BP</th>
@@ -816,13 +846,15 @@ body {
             <tbody>
                 <?php if (empty($deno_records)): ?>
                     <tr>
-                        <td colspan="10" style="text-align: center; padding: 40px;">No records found</td>
+                        <td colspan="12" style="text-align: center; padding: 40px;">No records found</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($deno_records as $record): ?>
                         <tr>
                             <td><?= $record['deno_id'] ?></td>
+                            <td><span style="font-weight:600;color:#007bff;"><?= htmlspecialchars($record['deno_no'] ?? '-') ?></span></td>
                             <td><strong><?= htmlspecialchars($record['ref_no']) ?></strong></td>
+                            <td><?= htmlspecialchars($record['fiscal_name'] ?? '-') ?></td>
                             <td>
                                 <span class="badge badge-<?= $record['entry_type'] ?>">
                                     <?= ucfirst(str_replace('_', ' ', $record['entry_type'])) ?>

@@ -14,7 +14,10 @@ $offset = ($current_page - 1) * $items_per_page;
 // Filter parameters
 $book_code_filter = isset($_GET['book_code']) ? $_GET['book_code'] : '';
 $class_filter = isset($_GET['class']) ? $_GET['class'] : '';
-$fiscal_year_filter = isset($_GET['fiscal_year']) ? $_GET['fiscal_year'] : '';
+// Defaults to the active fiscal year on first load (config/functions.php);
+// isset() so an explicit "All Years" choice (empty string) sticks.
+$active_fy_for_filter = getActiveFiscalYear($conn);
+$fiscal_year_filter = isset($_GET['fiscal_year']) ? $_GET['fiscal_year'] : ($active_fy_for_filter['id'] ?? '');
 $status_filter = isset($_GET['status']) ? $_GET['status'] : '';
 $search_text = isset($_GET['search']) ? trim($_GET['search']) : '';
 
@@ -71,7 +74,7 @@ $tickets_query = "
     SELECT j.id, j.job_ticket_code, j.lot, j.print_qty, j.status,
            j.created_date, j.class, j.print_done_qty, j.page_qty,
            b.book_name, b.book_code, b.class_level, u.username as created_by,
-           fy.fiscal_code, fy.id as fiscal_year_id
+           fy.fiscal_code, fy.fiscal_name, fy.id as fiscal_year_id
     FROM job_ticket j
     JOIN books b ON j.book_id = b.book_id
     JOIN users u ON j.created_by = u.id
@@ -91,14 +94,14 @@ $tickets = $tickets_stmt->fetchAll();
 // Get filter options
 $book_codes = $conn->query("SELECT DISTINCT book_code, book_name FROM books ORDER BY book_code")->fetchAll();
 $classes = $conn->query("SELECT DISTINCT class_level FROM books WHERE class_level IS NOT NULL ORDER BY class_level")->fetchAll();
-$fiscal_years = $conn->query("SELECT id, fiscal_code FROM fiscal_years ORDER BY fiscal_code DESC")->fetchAll();
+$fiscal_years = $conn->query("SELECT id, fiscal_code, fiscal_name FROM fiscal_years ORDER BY fiscal_code DESC")->fetchAll();
 $statuses = $conn->query("SELECT DISTINCT status FROM job_ticket WHERE status IS NOT NULL ORDER BY status")->fetchAll();
 
 // Handle export
 if (isset($_GET['export'])) {
     // Get all records for export (without pagination)
     $export_query = "
-        SELECT j.job_ticket_code, b.book_code, b.book_name, fy.fiscal_code,
+        SELECT j.job_ticket_code, b.book_code, b.book_name, fy.fiscal_code, fy.fiscal_name,
                b.class_level, j.lot, j.print_qty, j.print_done_qty, j.page_qty,
                j.status, u.username as created_by, j.created_date
         FROM job_ticket j
@@ -141,7 +144,7 @@ if (isset($_GET['export'])) {
             echo "<td>" . htmlspecialchars($row['job_ticket_code']) . "</td>";
             echo "<td>" . htmlspecialchars($row['book_code']) . "</td>";
             echo "<td>" . htmlspecialchars($row['book_name']) . "</td>";
-            echo "<td>" . htmlspecialchars($row['fiscal_code']) . "</td>";
+            echo "<td>" . htmlspecialchars($row['fiscal_name'] ?? $row['fiscal_code']) . "</td>";
             echo "<td>" . htmlspecialchars($row['class_level'] ?? 'N/A') . "</td>";
             echo "<td>" . htmlspecialchars($row['lot'] ?? 'N/A') . "</td>";
             echo "<td>" . number_format($row['print_qty']) . "</td>";
@@ -193,7 +196,7 @@ if (isset($_GET['export'])) {
             $html .= '<td>' . htmlspecialchars($row['job_ticket_code']) . '</td>';
             $html .= '<td>' . htmlspecialchars($row['book_code']) . '</td>';
             $html .= '<td>' . htmlspecialchars(substr($row['book_name'], 0, 30)) . '</td>';
-            $html .= '<td>' . htmlspecialchars($row['fiscal_code']) . '</td>';
+            $html .= '<td>' . htmlspecialchars($row['fiscal_name'] ?? $row['fiscal_code']) . '</td>';
             $html .= '<td>' . htmlspecialchars($row['class_level'] ?? 'N/A') . '</td>';
             $html .= '<td>' . htmlspecialchars($row['lot'] ?? 'N/A') . '</td>';
             $html .= '<td>' . number_format($row['print_qty']) . '</td>';
@@ -321,7 +324,7 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
                             <option value="">All Years</option>
                             <?php foreach ($fiscal_years as $fy): ?>
                                 <option value="<?= $fy['id'] ?>" <?= $fiscal_year_filter == $fy['id'] ? 'selected' : '' ?>>
-                                    <?= htmlspecialchars($fy['fiscal_code']) ?>
+                                    <?= htmlspecialchars($fy['fiscal_name'] ?? $fy['fiscal_code']) ?>
                                 </option>
                             <?php endforeach; ?>
                         </select>
@@ -421,7 +424,7 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
                                 <td class="text-truncate" style="max-width: 150px;" title="<?= htmlspecialchars($ticket['book_name']) ?>">
                                     <?= htmlspecialchars($ticket['book_name']) ?>
                                 </td>
-                                <td><?= htmlspecialchars($ticket['fiscal_code']) ?></td>
+                                <td><?= htmlspecialchars($ticket['fiscal_name'] ?? $ticket['fiscal_code']) ?></td>
                                 <td>
                                     <?php if ($ticket['class_level']): ?>
                                         <span class="badge bg-secondary">Class <?= $ticket['class_level'] ?></span>

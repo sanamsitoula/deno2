@@ -1,6 +1,7 @@
 <?php
 ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Check permissions
@@ -11,7 +12,10 @@ if (!has_role('viewer') && !has_role('incharge') && !has_role('supervisor') && !
 }
 
 // Get filter parameters
-$fiscal_year_filter = $_GET['fiscal_year'] ?? '';
+// Defaults to the active fiscal year on first load; isset() so an explicit
+// "All Fiscal Years" choice (empty string) sticks.
+$active_fy_for_filter = getActiveFiscalYear($conn);
+$fiscal_year_filter = isset($_GET['fiscal_year']) ? $_GET['fiscal_year'] : ($active_fy_for_filter['id'] ?? '');
 $job_code_filter = $_GET['job_code'] ?? '';
 $book_code_filter = $_GET['book_code'] ?? '';
 $class_filter = $_GET['class'] ?? '';
@@ -29,7 +33,7 @@ $completion_min = $_GET['completion_min'] ?? '';
 $completion_max = $_GET['completion_max'] ?? '';
 
 // Get dropdown data
-$fiscal_years = $conn->query("SELECT id, fiscal_code FROM fiscal_years ORDER BY fiscal_code DESC")->fetchAll(PDO::FETCH_ASSOC);
+$fiscal_years = $conn->query("SELECT id, fiscal_code, fiscal_name, is_active FROM fiscal_years ORDER BY fiscal_code DESC")->fetchAll(PDO::FETCH_ASSOC);
 $books = $conn->query("SELECT DISTINCT book_code, book_name FROM books ORDER BY book_code")->fetchAll(PDO::FETCH_ASSOC);
 $users = $conn->query("SELECT id, username FROM users ORDER BY username")->fetchAll(PDO::FETCH_ASSOC);
 $machines = $conn->query("SELECT id, machine_name FROM machines WHERE status = 'active' ORDER BY machine_name")->fetchAll(PDO::FETCH_ASSOC);
@@ -569,7 +573,7 @@ $avg_completion = $total_jobs > 0 ? round(array_sum(array_column($filtered_ticke
                         <option value="">All Fiscal Years</option>
                         <?php foreach ($fiscal_years as $fy): ?>
                             <option value="<?= $fy['id'] ?>" <?= $fiscal_year_filter == $fy['id'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars($fy['fiscal_code']) ?>
+                                <?= htmlspecialchars($fy['fiscal_name'] ?? $fy['fiscal_code']) ?><?= $fy['is_active'] ? ' (Active)' : '' ?>
                             </option>
                         <?php endforeach; ?>
                     </select>

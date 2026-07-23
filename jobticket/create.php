@@ -2,30 +2,11 @@
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
 redirect_if_not_logged_in();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
-// --- Utility Functions ---
-function generateJobTicketCode($conn, $fiscalYearId) {
-    $fyCode = $conn->query("SELECT fiscal_code FROM fiscal_years WHERE id = $fiscalYearId")->fetchColumn();
-    $count = $conn->query("SELECT COUNT(*) FROM job_ticket WHERE fiscal_year_id = $fiscalYearId")->fetchColumn();
-    $seq = str_pad($count + 1, 3, '0', STR_PAD_LEFT);
-    return "$fyCode-JT$seq";
-}
-
-function getFiscalYearId($conn) {
-    $fiscalStmt = $conn->query("SELECT id FROM fiscal_years WHERE is_active = TRUE LIMIT 1");
-    return $fiscalStmt->fetchColumn();
-}
-
-function getStatusBadge($status) {
-    switch ($status) {
-        case 'pending': return 'warning';
-        case 'in_progress': return 'primary';
-        case 'completed': return 'success';
-        case 'cancelled': return 'danger';
-        default: return 'secondary';
-    }
-}
+// generateJobTicketCode(), getFiscalYearId() and getStatusBadge() now live in
+// config/functions.php (shared, MAX()-based so numbering resets to 1 per fiscal year).
 
 function getNextLotNumber($conn, $bookId, $fiscalYearId) {
     // PostgreSQL compatible version

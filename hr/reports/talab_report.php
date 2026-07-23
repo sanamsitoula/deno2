@@ -7,13 +7,18 @@
 ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/auth.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 redirect_if_not_logged_in();
+
+// Default BS year follows whichever fiscal year is currently active
+$active_fy_row = getActiveFiscalYear($conn);
+$active_fy_bs_year = (int)($active_fy_row['fiscal_code'] ?? 2082);
 
 $bsMonths = [1=>'बैशाख',2=>'जेठ',3=>'असार',4=>'साउन',5=>'भाद्र',6=>'असोज',7=>'कार्तिक',8=>'मंसिर',9=>'पुष',10=>'माघ',11=>'फाल्गुण',12=>'चैत'];
 $bsMonthsEn = [1=>'Baisakh',2=>'Jestha',3=>'Ashadh',4=>'Shrawan',5=>'Bhadra',6=>'Ashwin',7=>'Kartik',8=>'Mangsir',9=>'Poush',10=>'Magh',11=>'Falgun',12=>'Chaitra'];
 
-$selYear  = (int)($_GET['bs_year']  ?? 2082);
+$selYear  = (int)($_GET['bs_year']  ?? $active_fy_bs_year);
 $selMonth = (int)($_GET['bs_month'] ?? 10);
 $empType  = $_GET['emp_type'] ?? '';
 $export   = $_GET['export'] ?? '';

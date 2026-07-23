@@ -176,6 +176,7 @@ function getUrl($path = '') {
         <li><a class="dropdown-item" href="<?= getUrl('book/index.php') ?>">Books</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('forma/index.php') ?>">Forma</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('config/users.php') ?>">Users</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('config/fiscal_years.php') ?>"><i class="bi bi-calendar-range me-1"></i>Fiscal Years</a></li>
     </ul>
 </li>
 

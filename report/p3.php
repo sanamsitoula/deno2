@@ -6,6 +6,7 @@
 
 ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // ─── Permissions ─────────────────────────────────────────────────────────
@@ -16,7 +17,10 @@ if (!has_role('viewer') && !has_role('operator') && !has_role('incharge') && !ha
 }
 
 // ─── Filter Parameters ───────────────────────────────────────────────────
-$fiscal_year_filter = $_GET['fiscal_year'] ?? '';
+// Defaults to the active fiscal year on first load; isset() so an explicit
+// "All Fiscal Years" choice (empty string) sticks.
+$active_fy_for_filter = getActiveFiscalYear($conn);
+$fiscal_year_filter = isset($_GET['fiscal_year']) ? $_GET['fiscal_year'] : ($active_fy_for_filter['id'] ?? '');
 $book_code_filter   = $_GET['book_code'] ?? '';
 $status_filter      = $_GET['status'] ?? '';
 $view_month         = $_GET['month'] ?? date('Y-m');

@@ -46,7 +46,7 @@ if (!$ticket) {
                     <p><strong>Book Code:</strong> <?= htmlspecialchars($ticket['book_code']) ?></p>
                     <p><strong>Book Name:</strong> <?= htmlspecialchars($ticket['book_name']) ?></p>
                     <p><strong>Job Ticket Code:</strong> <?= htmlspecialchars($ticket['job_ticket_code']) ?></p>
-                    <p><strong>Fiscal Year:</strong> <?= htmlspecialchars($ticket['fiscal_code']) ?></p> <!-- Assuming fiscal_year is fetched correctly -->
+                    <p><strong>Fiscal Year:</strong> <?= htmlspecialchars($ticket['fiscal_name'] ?? $ticket['fiscal_code']) ?></p>
                     <p><strong>Lot No:</strong> <?= htmlspecialchars($ticket['lot']) ?></p>
                 </div>
                 <div class="col-md-6">

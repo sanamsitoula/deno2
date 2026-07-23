@@ -1,5 +1,6 @@
 <?php
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 // Handle delete action
@@ -39,10 +40,22 @@ $records_per_page = 50;
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $offset = ($page - 1) * $records_per_page;
 
-// Default date range (2082.04.01 to 2083.03.32)
-$current_nepali_year = '2082';
-$start_date = isset($_GET['start_date']) ? $_GET['start_date'] : $current_nepali_year . '.04.01';
-$end_date = isset($_GET['end_date']) ? $_GET['end_date'] : ($current_nepali_year + 1) . '.03.32';
+// Default date range — Shrawan 1 to next Ashadh end of whichever fiscal year
+// is currently active (config/functions.php::getActiveFiscalDateRange).
+// Changing the active fiscal year in Setup > Fiscal Years automatically moves
+// this default on next page load, no hardcoded year.
+$active_fy_range = getActiveFiscalDateRange($conn);
+$start_date = isset($_GET['start_date']) ? $_GET['start_date'] : $active_fy_range['start'];
+$end_date = isset($_GET['end_date']) ? $_GET['end_date'] : $active_fy_range['end'];
+
+// Fiscal years for the filter dropdown — defaults to whichever is currently active
+$fiscal_years_list = $conn->query("
+    SELECT id, fiscal_code, fiscal_name, is_active
+    FROM fiscal_years
+    ORDER BY start_date DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$active_fy_id = $active_fy_range['fiscal_year_id'] ?? '';
 
 // Get search parameters
 $search_params = [
@@ -50,6 +63,10 @@ $search_params = [
     'class_level' => $_GET['class_level'] ?? '',
     'translated' => $_GET['translated'] ?? '',
     'ref_no' => $_GET['ref_no'] ?? '',
+    'deno_no' => $_GET['deno_no'] ?? '',
+    // Defaults to the active fiscal year on first load; isset() so an explicit
+    // "All Fiscal Years" choice (empty string) doesn't get overridden back to active.
+    'fiscal_year_id' => isset($_GET['fiscal_year_id']) ? $_GET['fiscal_year_id'] : $active_fy_id,
     'start_date' => $start_date,
     'end_date' => $end_date
 ];
@@ -64,10 +81,11 @@ $count_query = "
 
 // Build the main query - WITH D2M NUMBERS
 $query = "
-    SELECT d.*, 
-           b.book_name, 
-           b.class_level, 
+    SELECT d.*,
+           b.book_name,
+           b.class_level,
            b.is_translated,
+           fy.fiscal_name,
            (
                SELECT COUNT(*) 
                FROM d2m_items di 
@@ -82,8 +100,9 @@ $query = "
                WHERE di.associated_deno_ids LIKE '%' || d.id || '%'
                  AND dm.deleted_at IS NULL
            ) as d2m_numbers
-    FROM deno d 
-    LEFT JOIN books b ON d.book_code = b.book_code 
+    FROM deno d
+    LEFT JOIN books b ON d.book_code = b.book_code
+    LEFT JOIN fiscal_years fy ON d.fiscal_year_id = fy.id
     WHERE 1=1
 ";
 
@@ -109,6 +128,16 @@ if ($search_params['translated'] !== '') {
 if (!empty($search_params['ref_no'])) {
     $conditions .= " AND d.ref_no LIKE :ref_no";
     $bind_params[':ref_no'] = '%' . $search_params['ref_no'] . '%';
+}
+
+if (!empty($search_params['deno_no'])) {
+    $conditions .= " AND d.deno_no ILIKE :deno_no";
+    $bind_params[':deno_no'] = '%' . $search_params['deno_no'] . '%';
+}
+
+if (!empty($search_params['fiscal_year_id'])) {
+    $conditions .= " AND d.fiscal_year_id = :fiscal_year_id";
+    $bind_params[':fiscal_year_id'] = $search_params['fiscal_year_id'];
 }
 
 // Add date range condition
@@ -172,11 +201,13 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
     $export_records = $export_stmt->fetchAll(PDO::FETCH_ASSOC);
     
     echo "<table border='1'>";
-    echo "<tr><th>ID</th><th>Book Name</th><th>Book Code</th><th>Class Level</th><th>Translated</th><th>Ref No</th><th>Nepali Date</th><th>Per Poka</th><th>Poka Qty</th><th>Total Qty</th><th>Open Pcs</th><th>D2M Numbers</th><th>Created By</th><th>Created At</th></tr>";
-    
+    echo "<tr><th>ID</th><th>Deno No</th><th>Fiscal Year</th><th>Book Name</th><th>Book Code</th><th>Class Level</th><th>Translated</th><th>Ref No</th><th>Nepali Date</th><th>Per Poka</th><th>Poka Qty</th><th>Total Qty</th><th>Open Pcs</th><th>D2M Numbers</th><th>Created By</th><th>Created At</th></tr>";
+
     foreach ($export_records as $record) {
         echo "<tr>";
         echo "<td>" . $record['id'] . "</td>";
+        echo "<td>" . htmlspecialchars($record['deno_no'] ?? '') . "</td>";
+        echo "<td>" . htmlspecialchars($record['fiscal_name'] ?? '') . "</td>";
         echo "<td>" . htmlspecialchars($record['book_name']) . "</td>";
         echo "<td>" . htmlspecialchars($record['book_code']) . "</td>";
         echo "<td>" . htmlspecialchars($record['class_level']) . "</td>";
@@ -591,12 +622,32 @@ h2 {
                 
                 <div class="search-group">
                     <label for="ref_no">📄 Reference No:</label>
-                    <input type="text" name="ref_no" id="ref_no" class="search-control" 
+                    <input type="text" name="ref_no" id="ref_no" class="search-control"
                            placeholder="Enter reference number..."
                            value="<?= htmlspecialchars($search_params['ref_no']) ?>">
                 </div>
+
+                <div class="search-group">
+                    <label for="deno_no">🔢 Deno No:</label>
+                    <input type="text" name="deno_no" id="deno_no" class="search-control"
+                           placeholder="e.g. 1/deno/82-83"
+                           value="<?= htmlspecialchars($search_params['deno_no']) ?>">
+                </div>
+
+                <div class="search-group">
+                    <label for="fiscal_year_id">📅 Fiscal Year:</label>
+                    <select name="fiscal_year_id" id="fiscal_year_id" class="search-control">
+                        <option value="">All Fiscal Years</option>
+                        <?php foreach ($fiscal_years_list as $fy): ?>
+                            <option value="<?= $fy['id'] ?>"
+                                    <?= (string)$search_params['fiscal_year_id'] === (string)$fy['id'] ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($fy['fiscal_name'] ?? $fy['fiscal_code']) ?><?= $fy['is_active'] ? ' (Active)' : '' ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
             </div>
-            
+
             <div class="search-row">
                 <div class="search-group">
                     <label for="start_date">📅 Start Date (YYYY.MM.DD):</label>
@@ -639,6 +690,8 @@ h2 {
             <thead>
                 <tr>
                     <th>ID</th>
+                    <th>Deno No</th>
+                    <th>Fiscal Year</th>
                     <th>Book Name</th>
                     <th>Code</th>
                     <th>Class</th>
@@ -660,6 +713,8 @@ h2 {
                     <?php foreach ($deno_records as $record): ?>
                     <tr>
                         <td><?= $record['id'] ?></td>
+                        <td><span style="font-weight:600;color:#007bff;"><?= htmlspecialchars($record['deno_no'] ?? '-') ?></span></td>
+                        <td><?= htmlspecialchars($record['fiscal_name'] ?? '-') ?></td>
                         <td><strong><?= htmlspecialchars($record['book_name']) ?></strong></td>
                         <td><?= htmlspecialchars($record['book_code']) ?></td>
                         <td><?= $record['class_level'] ?></td>
@@ -718,7 +773,7 @@ h2 {
                     <?php endforeach; ?>
                     
                     <tr class="totals-row">
-                        <td colspan="8"><strong>📊 Page Totals:</strong></td>
+                        <td colspan="10"><strong>📊 Page Totals:</strong></td>
                         <td><strong><?= number_format($total_poka_qty) ?></strong></td>
                         <td><strong><?= number_format($total_quantity) ?></strong></td>
                         <td><strong><?= number_format($total_open_pcs) ?></strong></td>
@@ -726,7 +781,7 @@ h2 {
                     </tr>
                 <?php else: ?>
                     <tr>
-                        <td colspan="15" style="text-align: center; padding: 40px; color: #6c757d;">
+                        <td colspan="17" style="text-align: center; padding: 40px; color: #6c757d;">
                             <strong>📭 No records found matching your search criteria.</strong><br>
                             <small>Try adjusting your search parameters.</small>
                         </td>

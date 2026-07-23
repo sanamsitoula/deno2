@@ -21,7 +21,7 @@ if (!$d2m_id) {
 // Fetch D2M record
 $stmt = $conn->prepare("
     SELECT d.*, 
-           fy.fiscal_code as fiscal_year_name,
+           fy.fiscal_name as fiscal_year_name,
            fy.id as fiscal_year_id
     FROM d2m d 
     LEFT JOIN fiscal_years fy ON d.fiscal_year_id = fy.id
