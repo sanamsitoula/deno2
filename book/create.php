@@ -12,6 +12,42 @@ if (!has_role('editor') && !has_role('admin')) {
     exit();
 }
 
+// Resolves which book_titles.id this edition belongs to — either an existing
+// title picked from the dropdown, or a brand-new title created inline.
+function resolveTitleId($conn, $post) {
+    $mode = $post['title_mode'] ?? 'existing';
+
+    if ($mode === 'new') {
+        $title_code = strtoupper(trim($post['new_title_code'] ?? ''));
+        $title_name = trim($post['new_title_name'] ?? '');
+        if ($title_code === '' || $title_name === '') {
+            throw new Exception("Title Code and Title Name are required when creating a new title.");
+        }
+        $chk = $conn->prepare("SELECT id FROM book_titles WHERE title_code = ?");
+        $chk->execute([$title_code]);
+        $existing = $chk->fetchColumn();
+        if ($existing) return (int)$existing; // reuse if it already exists
+
+        $stmt = $conn->prepare("
+            INSERT INTO book_titles (title_code, title_name, class_level, is_translated, book_type, business_associated)
+            VALUES (?, ?, ?, ?, ?, ?)
+            RETURNING id
+        ");
+        $stmt->execute([
+            $title_code,
+            $title_name,
+            !empty($post['class_level']) ? (int)$post['class_level'] : null,
+            isset($post['is_translated']) ? 't' : 'f',
+            $post['book_type'] ?? 'TextBook',
+            $post['business_associated'] ?? 'CDC',
+        ]);
+        return (int)$stmt->fetchColumn();
+    }
+
+    // mode === 'existing' — may be blank (edition not linked to any title yet)
+    return !empty($post['title_id']) ? (int)$post['title_id'] : null;
+}
+
 $message   = '';
 $edit_book = null;
 
@@ -61,11 +97,20 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
             $usr = $conn->prepare("SELECT username FROM users WHERE id = ?");
             $usr->execute([$_SESSION['user_id']]);
             $username = $usr->fetchColumn();
+            // Legacy created_by is varchar(5) — too short for most real usernames
+            // (was throwing a hard truncation error and failing the whole insert).
+            // created_by_id (integer, FK to users) is now the reliable source of
+            // truth; this truncated value is kept only so the NOT NULL legacy
+            // column stays satisfied for anything still reading it.
+            $username_short = substr($username ?: '', 0, 5);
+
+            $title_id = resolveTitleId($conn, $_POST);
 
             $stmt = $conn->prepare("
                 INSERT INTO books (book_code, book_name, class_level, fiscal_year,
-                    is_translated, is_optional, business_associated, book_type, created_by)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    is_translated, is_optional, business_associated, book_type, created_by,
+                    created_by_id, title_id, page_count, is_active)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ");
             $stmt->execute([
                 strtoupper(trim($_POST['book_code'])),
@@ -76,7 +121,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
                 isset($_POST['is_optional'])   ? 't' : 'f',
                 $_POST['business_associated'] ?? 'CDC',
                 $_POST['book_type'] ?? 'TextBook',
-                $username
+                $username_short,
+                $_SESSION['user_id'],
+                $title_id,
+                !empty($_POST['page_count']) ? (int)$_POST['page_count'] : null,
+                isset($_POST['is_active']) ? 't' : 'f',
             ]);
             $conn->commit();
             $_SESSION['success'] = 'Book created successfully!';
@@ -88,11 +137,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
             $chk->execute([$_POST['book_code'], $book_id]);
             if ($chk->fetchColumn() > 0) throw new Exception("Book code already exists. Please use a unique book code.");
 
+            $title_id = resolveTitleId($conn, $_POST);
+
             $stmt = $conn->prepare("
                 UPDATE books SET
                     book_code = ?, book_name = ?, class_level = ?, fiscal_year = ?,
                     is_translated = ?, is_optional = ?, business_associated = ?,
-                    book_type = ?, updated_at = CURRENT_TIMESTAMP
+                    book_type = ?, title_id = ?, page_count = ?, is_active = ?,
+                    updated_at = CURRENT_TIMESTAMP
                 WHERE book_id = ?
             ");
             $stmt->execute([
@@ -104,6 +156,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && in_array
                 isset($_POST['is_optional'])   ? 't' : 'f',
                 $_POST['business_associated'] ?? 'CDC',
                 $_POST['book_type'] ?? 'TextBook',
+                $title_id,
+                !empty($_POST['page_count']) ? (int)$_POST['page_count'] : null,
+                isset($_POST['is_active']) ? 't' : 'f',
                 $book_id
             ]);
             $conn->commit();
@@ -130,6 +185,34 @@ try {
 $active_fy = !empty($fiscal_years) ? $fiscal_years[0]['fiscal_year'] : '';
 // Strip the slash part for the code (e.g. "2081/82" → "2081")
 $active_fy_code = $active_fy ? strtok($active_fy, '/') : '';
+
+// Book Titles — the stable cross-year identity this edition links to.
+// Only active titles are offered for new links; the edit page also shows the
+// title currently linked even if it happens to be inactive (so nothing looks
+// silently unset).
+$book_titles = $conn->query("
+    SELECT id, title_code, title_name, class_level, is_translated
+    FROM book_titles
+    WHERE is_active = true
+    ORDER BY title_name
+")->fetchAll(PDO::FETCH_ASSOC);
+
+// If we're editing a book whose linked title has since gone inactive, still
+// include it in the dropdown (as the pre-selected option) so the existing
+// link is visible rather than silently disappearing.
+if ($edit_book && !empty($edit_book['title_id'])) {
+    $already_listed = array_filter($book_titles, function ($t) use ($edit_book) {
+        return (int)$t['id'] === (int)$edit_book['title_id'];
+    });
+    if (empty($already_listed)) {
+        $linked_stmt = $conn->prepare("SELECT id, title_code, title_name, class_level, is_translated FROM book_titles WHERE id = ?");
+        $linked_stmt->execute([$edit_book['title_id']]);
+        $linked_title = $linked_stmt->fetch(PDO::FETCH_ASSOC);
+        if ($linked_title) {
+            $book_titles[] = $linked_title;
+        }
+    }
+}
 
 // ── Normal page load — HTML output starts here ─────────────────────────────────
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
@@ -216,6 +299,63 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
                             </select>
                             <div class="form-text">Pulled from active fiscal years.</div>
                         </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold" for="page_count">Page Count</label>
+                            <input type="number" min="0" class="form-control" id="page_count" name="page_count"
+                                   value="<?= $edit_book && $edit_book['page_count'] !== null ? (int)$edit_book['page_count'] : '' ?>"
+                                   placeholder="e.g., 120">
+                            <div class="form-text">This edition's total pages — changes year to year with content.</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ── Section: Title (cross-year identity) ── -->
+                <div class="form-section mb-4">
+                    <h6 class="section-title">
+                        <i class="fas fa-layer-group me-2 text-primary"></i>Title (Cross-Year Identity)
+                    </h6>
+                    <p class="text-muted small">
+                        Every yearly edition needs its own unique Book Code above (price/pages/content
+                        change each year). The <strong>Title</strong> is the stable identity that stays
+                        the same across editions, so lifetime/all-year production reports can sum this
+                        book's output across every year it's been printed.
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <div class="btn-group" role="group" aria-label="Title mode">
+                                <input type="radio" class="btn-check" name="title_mode" id="titleModeExisting" value="existing"
+                                       <?= (!$edit_book || $edit_book['title_id']) ? 'checked' : '' ?>>
+                                <label class="btn btn-outline-primary btn-sm" for="titleModeExisting">Link to Existing Title</label>
+
+                                <input type="radio" class="btn-check" name="title_mode" id="titleModeNew" value="new"
+                                       <?= ($edit_book && !$edit_book['title_id']) ? 'checked' : '' ?>>
+                                <label class="btn btn-outline-primary btn-sm" for="titleModeNew">Create New Title</label>
+                            </div>
+                        </div>
+                        <div class="col-md-8" id="titleExistingBlock">
+                            <label class="form-label fw-semibold" for="title_id">Existing Title</label>
+                            <select class="form-select" id="title_id" name="title_id">
+                                <option value="">— None (not linked to a title) —</option>
+                                <?php foreach ($book_titles as $t): ?>
+                                    <option value="<?= $t['id'] ?>" data-code="<?= htmlspecialchars($t['title_code']) ?>"
+                                        <?= ($edit_book && (int)$edit_book['title_id'] === (int)$t['id']) ? 'selected' : '' ?>>
+                                        <?= htmlspecialchars($t['title_code']) ?> — <?= htmlspecialchars($t['title_name']) ?>
+                                        <?= $t['class_level'] ? ' (Class ' . $t['class_level'] . ')' : '' ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                            <div class="form-text">Pick the title this edition is a revision of, if any.</div>
+                        </div>
+                        <div class="col-md-6" id="titleNewCode" style="display:none">
+                            <label class="form-label fw-semibold" for="new_title_code">New Title Code</label>
+                            <input type="text" class="form-control font-monospace" id="new_title_code" name="new_title_code"
+                                   placeholder="e.g., MATH6-NT" style="text-transform:uppercase">
+                        </div>
+                        <div class="col-md-6" id="titleNewName" style="display:none">
+                            <label class="form-label fw-semibold" for="new_title_name">New Title Name</label>
+                            <input type="text" class="form-control" id="new_title_name" name="new_title_name"
+                                   placeholder="e.g., Math Grade 6 (Non-Translated)">
+                        </div>
                     </div>
                 </div>
 
@@ -280,6 +420,22 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
                                     <i class="fas fa-star me-1 text-warning"></i>
                                     Optional Book
                                 </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <div class="prop-check p-3 rounded-2 border d-flex align-items-center gap-3 <?= (!$edit_book || $edit_book['is_active']) ? 'active' : '' ?>"
+                                 id="activeCard">
+                                <input class="form-check-input mt-0 flex-shrink-0" type="checkbox"
+                                       id="is_active" name="is_active"
+                                       <?= (!$edit_book || $edit_book['is_active']) ? 'checked' : '' ?>>
+                                <label for="is_active" class="mb-0 fw-semibold" style="cursor:pointer">
+                                    <i class="fas fa-toggle-on me-1 text-success"></i>
+                                    Active Edition
+                                </label>
+                            </div>
+                            <div class="form-text">
+                                Uncheck once a newer edition supersedes this one — it stays in every
+                                report, just hidden from day-to-day "pick a book" lists.
                             </div>
                         </div>
                     </div>
@@ -435,6 +591,24 @@ function abbreviateName(name) {
     return abbr;
 }
 
+// The book_code's "name" segment is derived from the Title whenever one is
+// linked (existing or newly created), instead of re-abbreviating book_name
+// from scratch each time — so every edition of the same title shares the
+// same base code (e.g. MATH6-NT-2080, MATH6-NT-2081, ...) and stays aligned
+// with the title/page-count metadata rather than drifting per edition.
+function currentTitleBase() {
+    const mode = document.querySelector('input[name="title_mode"]:checked').value;
+    if (mode === 'new') {
+        const code = document.getElementById('new_title_code').value.trim();
+        if (code) return code.toUpperCase().replace(/[^A-Z0-9-]/g, '');
+    } else {
+        const sel = document.getElementById('title_id');
+        const opt = sel.options[sel.selectedIndex];
+        if (opt && opt.value && opt.dataset.code) return opt.dataset.code;
+    }
+    return null; // no title linked yet — fall back to abbreviating the book name
+}
+
 function generateCode() {
     const name       = document.getElementById('book_name').value.trim();
     const cls        = document.getElementById('class_level').value;
@@ -443,13 +617,18 @@ function generateCode() {
     const fySelect   = document.getElementById('fiscal_year');
     const fy         = fySelect.value || ACTIVE_FY_CODE;
 
-    const nameAbbr   = abbreviateName(name);              // e.g. OPTMTH
+    const titleBase  = currentTitleBase();
+    const nameAbbr   = titleBase || abbreviateName(name);  // aligned to Title when linked
     const classPart  = cls ? cls.toString().padStart(2,'0') : '';  // e.g. 10
     const transPart  = isTransl ? 'T' : 'NT';             // T or NT
     const typePart   = TYPE_MAP[bookType] || bookType.substring(0,2).toUpperCase();
     const fyPart     = fy ? fy.split('/')[0] : '';        // e.g. 2081
 
-    const parts = [nameAbbr, classPart, transPart, typePart, fyPart].filter(Boolean);
+    // When the base already came from a Title code, don't also re-append
+    // class/translation/type — the title already encodes those; just add
+    // the fiscal year so editions read as TITLECODE-YEAR.
+    const parts = titleBase ? [titleBase, fyPart].filter(Boolean)
+                             : [nameAbbr, classPart, transPart, typePart, fyPart].filter(Boolean);
     return parts.join('-');
 }
 
@@ -467,12 +646,13 @@ function applyGenerated() {
 }
 
 // Wire up live preview to all relevant fields
-['book_name','class_level','book_type','fiscal_year'].forEach(id => {
+['book_name','class_level','book_type','fiscal_year','title_id','new_title_code'].forEach(id => {
     const el = document.getElementById(id);
     if (el) el.addEventListener('change', updatePreview);
     if (el && el.tagName === 'INPUT') el.addEventListener('input', updatePreview);
 });
 document.getElementById('is_translated').addEventListener('change', updatePreview);
+document.querySelectorAll('input[name="title_mode"]').forEach(r => r.addEventListener('change', updatePreview));
 
 // Manual edit syncs preview
 document.getElementById('book_code').addEventListener('input', function() {
@@ -497,8 +677,36 @@ document.getElementById('book_name').addEventListener('blur', function() {
 // Initial preview
 updatePreview();
 
+// ── Title mode toggle (existing vs. new title) ────────────────────────────────
+function updateTitleModeUI() {
+    const isNew = document.getElementById('titleModeNew').checked;
+    document.getElementById('titleExistingBlock').style.display = isNew ? 'none' : '';
+    document.getElementById('titleNewCode').style.display       = isNew ? '' : 'none';
+    document.getElementById('titleNewName').style.display       = isNew ? '' : 'none';
+
+    // Suggest a title code/name from the book name when switching to "new"
+    // (only fills blanks — never overwrites something the user already typed).
+    if (isNew) {
+        const nameEl = document.getElementById('book_name');
+        const codeEl = document.getElementById('new_title_code');
+        const titleNameEl = document.getElementById('new_title_name');
+        if (nameEl.value.trim()) {
+            if (!codeEl.value.trim()) codeEl.value = abbreviateName(nameEl.value.trim());
+            if (!titleNameEl.value.trim()) titleNameEl.value = nameEl.value.trim();
+        }
+    }
+    updatePreview();
+}
+document.getElementById('titleModeExisting').addEventListener('change', updateTitleModeUI);
+document.getElementById('titleModeNew').addEventListener('change', updateTitleModeUI);
+updateTitleModeUI();
+
+document.getElementById('new_title_code').addEventListener('input', function() {
+    this.value = this.value.toUpperCase();
+});
+
 // ── Prop-check cards toggle styling ──────────────────────────────────────────
-['is_translated','is_optional'].forEach(id => {
+['is_translated','is_optional','is_active'].forEach(id => {
     const cb   = document.getElementById(id);
     const card = cb.closest('.prop-check');
     cb.addEventListener('change', function() {

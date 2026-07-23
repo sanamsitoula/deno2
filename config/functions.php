@@ -122,8 +122,12 @@ function getStatusBadge($status) {
 }
 
 // --- Helper Functions for Forms ---
-function getBooks($conn) {
-    return $conn->query("SELECT book_id, book_code, book_name, class_level FROM books ORDER BY book_code")->fetchAll();
+// $includeInactive=false (default) hides obsolete/superseded editions from
+// day-to-day "pick a book" dropdowns (job tickets, deno entries, etc.).
+// Reports must NOT use this filter — they always show every edition.
+function getBooks($conn, $includeInactive = false) {
+    $where = $includeInactive ? '' : 'WHERE is_active = true';
+    return $conn->query("SELECT book_id, book_code, book_name, class_level FROM books $where ORDER BY book_code")->fetchAll();
 }
 
 function getFormas($conn) {

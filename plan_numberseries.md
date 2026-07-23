@@ -293,3 +293,59 @@ Also fixed a few fiscal-year dropdowns that were still displaying raw `fiscal_co
 ### Explicitly deferred (user's choice)
 
 - **Nepali calendar-picker widget rollout** across create/edit/index date filters in deno, reports, d2m, jobticket, bookpacking, formaprinting — not started. Some pages already have it (`d2m/create.php`, `entries/deno.php` use `NepaliDatePicker v5`); most search-filter date inputs across the report pages above are still plain text fields with a placeholder hint. Needs its own audit pass.
+
+---
+
+## 8. Book Titles — cross-year identity + lifetime production reporting (2026-07-23)
+
+Separate from fiscal-year numbering, but related and requested in the same session: `books.book_code` is UNIQUE, so a revised edition (new price/pages/content) each fiscal year needs a brand-new code (e.g. `MATH6-NT-2080` → `MATH6-NT-2081`). There was no stable identity to answer "how much Math6-NT have we produced across every year?" — this section adds one, additively, without changing how job_ticket/forma/deno/d2m reference the specific edition.
+
+### Schema (`sql/migrations/006_book_titles_versioning.sql`, applied to local DB)
+
+- New `book_titles` table: `title_code` (unique, stable, never changes across editions), `title_name`, `class_level`, `is_translated`, `book_type`, `business_associated`, `is_active`.
+- `books` gets three new columns: `title_id` (FK to `book_titles`), `page_count` (this edition's page count — changes year to year with content, tracked directly rather than inferred from `forma`, since forma rows may not exist yet when a book is created), `is_active` (hides obsolete editions from day-to-day pick-lists; never affects reports).
+
+### `book/create.php` (create + edit, same file)
+
+- New "Title (Cross-Year Identity)" section: link to an existing active title, or create a new one inline (title_code/title_name auto-suggested from the book name, editable). `resolveTitleId()` handles both paths server-side, including reusing an existing title_code if it already exists rather than erroring.
+- New **Page Count** field and **Active Edition** toggle (defaults checked — "no need to always show the old edition... when needed it should be seen in the report" per your request: unchecking only hides it from pick-lists, never from reports/history).
+- **Book code generation now aligns with the Title**: when a title is linked (existing or new), the auto-generated book code uses the title_code as its base (`{title_code}-{fiscalYear}`) instead of re-abbreviating the book name from scratch each time — so every edition of the same title shares a recognizable, consistent code pattern. Falls back to the old name-abbreviation behavior only when no title is linked.
+- Edit mode: if a book's linked title has since gone inactive, it's still shown as the selected option (fetched separately) rather than silently disappearing from the dropdown.
+
+### `book/index.php`
+
+- Defaults to showing **Active editions only** (`status=active`), with a Status filter (Active / Obsolete / All) — obsolete editions stay fully in the database and every report, just out of the day-to-day list.
+- New columns: Title, Page Count, Status badge.
+
+### `book/view.php`
+
+- Shows Page Count, Edition Status (Active/Obsolete), and the linked Title with a link to that title's lifetime report.
+
+### New: `book/title_report.php` — the "summing + separate" report
+
+- Top-level list: one row per Title, with lifetime production **summed from `deno.total_qty` across every edition** (matches the "10,000 this year + 25,000 next year" framing) — verified end-to-end with a rolled-back transaction test producing exactly 35,000 for a 2-edition title.
+- Click a title to expand a **separate**, per-edition breakdown table (book code, fiscal year, page count, active status, entry count, that edition's own total) — so both the combined total and the individual years are visible in one place.
+- Filterable by search/class/title-status. Linked from `book/index.php` and the main `reports.php` hub.
+
+### `denoreports/monthly.php` / `daywisemonth.php`
+
+- Both already-per-book report tables now show the linked Title code as a small annotation under the book code (added via a `LEFT JOIN book_titles`), so a user browsing these existing per-fiscal-year reports can see which title an edition belongs to, without restructuring the tables' existing pivot/column layout.
+
+### `config/functions.php`
+
+- `getBooks($conn, $includeInactive = false)` now filters to active editions by default (used by `jobticket/edit.php` etc.) — reports and other explicit book queries were **not** changed to filter by active, per the "always visible in reports" requirement.
+
+### Verified
+
+- `php -l` clean on all 8 files touched.
+- Full dry-run (rolled-back transaction): created a title, two editions (2080 inactive/120pp, 2081 active/135pp), two deno production entries (10,000 and 25,000), then ran the exact lifetime-report and per-edition queries — got `lifetime_total = 35000`, `edition_count = 2`, and correct per-edition figures. No data left behind.
+
+### Fixed: `books.created_by` truncation bug (2026-07-23, follow-up)
+
+The pre-existing bug above is now fixed, additively. `sql/migrations/007_books_created_by_id.sql` adds `books.created_by_id integer REFERENCES users(id)` — the legacy `created_by varchar(5)` column is left in place (still `NOT NULL`) but `book/create.php` now writes a safely truncated value there (`substr($username, 0, 5)`, just to satisfy the constraint) while `created_by_id` becomes the real source of truth. `book/index.php` and `book/view.php`'s "Created By" display now joins on `created_by_id = users.id` instead of the broken username match. Verified with a rolled-back transaction using a 15-character username (`NyuchheRamTyata`) that previously crashed the insert — now inserts cleanly and displays the full username correctly.
+
+### Not touched / still open
+
+- Other book dropdowns across the app (`entries/*.php`, `forma/*.php`, `jobtick*/`, various report pages) still list *all* books regardless of `is_active` — only `getBooks()`/`jobticket/edit.php` was switched. Extending "active-only in pick-lists" everywhere is a larger sweep, not done in this pass.
+- No auto-deactivation: creating a new edition of a title does **not** automatically flip the previous edition's `is_active` to false — that's a manual step (or future enhancement) so nothing changes state unexpectedly.
+- Live/production migration still pending — `006_book_titles_versioning.sql` needs to run there too, same as `005`.

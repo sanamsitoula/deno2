@@ -18,10 +18,12 @@ if (!$book_id) {
 
 // Fetch book details
 $stmt = $conn->prepare("
-    SELECT b.*, 
-           u1.username as created_by_name
+    SELECT b.*,
+           u1.username as created_by_name,
+           t.title_code, t.title_name
     FROM books b
-    LEFT JOIN users u1 ON b.created_by = u1.username
+    LEFT JOIN users u1 ON b.created_by_id = u1.id
+    LEFT JOIN book_titles t ON b.title_id = t.id
     WHERE b.book_id = ?
 ");
 $stmt->execute([$book_id]);
@@ -36,7 +38,7 @@ if (!$book) {
 // Get related job tickets
 $job_tickets_stmt = $conn->prepare("
     SELECT jt.id, jt.job_ticket_code, jt.lot, jt.print_qty, jt.status, 
-           jt.created_date, fy.fiscal_code
+           jt.created_date, fy.fiscal_code, fy.fiscal_name
     FROM job_ticket jt
     JOIN fiscal_years fy ON jt.fiscal_year_id = fy.id
     WHERE jt.book_id = ?
@@ -389,6 +391,33 @@ body {
                 </div>
             </div>
             <div class="info-item">
+                <div class="info-label">Page Count</div>
+                <div class="info-value">
+                    <?= $book['page_count'] !== null ? (int)$book['page_count'] : '<span class="text-muted">N/A</span>' ?>
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Edition Status</div>
+                <div class="info-value">
+                    <?php if ($book['is_active']): ?>
+                        <span class="badge badge-yes"><i class="fas fa-check me-1"></i>Active</span>
+                    <?php else: ?>
+                        <span class="badge badge-no"><i class="fas fa-ban me-1"></i>Obsolete</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <div class="info-item">
+                <div class="info-label">Title (Cross-Year Identity)</div>
+                <div class="info-value">
+                    <?php if ($book['title_id']): ?>
+                        <code><?= htmlspecialchars($book['title_code']) ?></code> — <?= htmlspecialchars($book['title_name']) ?>
+                        &nbsp;<a href="title_report.php?title_id=<?= (int)$book['title_id'] ?>" class="small">View all editions →</a>
+                    <?php else: ?>
+                        <span class="text-muted">Not linked to a title</span>
+                    <?php endif; ?>
+                </div>
+            </div>
+            <div class="info-item">
                 <div class="info-label">Is Translated</div>
                 <div class="info-value">
                     <?php if ($book['is_translated']): ?>
@@ -484,7 +513,7 @@ body {
                         <?php foreach ($job_tickets as $ticket): ?>
                         <tr>
                             <td><strong><?= htmlspecialchars($ticket['job_ticket_code']) ?></strong></td>
-                            <td><?= htmlspecialchars($ticket['fiscal_code']) ?></td>
+                            <td><?= htmlspecialchars($ticket['fiscal_name'] ?? $ticket['fiscal_code']) ?></td>
                             <td><?= htmlspecialchars($ticket['lot']) ?></td>
                             <td><?= number_format($ticket['print_qty']) ?></td>
                             <td>

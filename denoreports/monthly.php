@@ -136,10 +136,12 @@ SELECT
     b.book_code,
     b.class_level,
     b.is_translated,
+    t.title_code,
     sub.deno_year,
     sub.month_num,
     COALESCE(SUM(sub.total_qty), 0) AS total_produced
 FROM Books b
+LEFT JOIN book_titles t ON b.title_id = t.id
 LEFT JOIN (
     SELECT
         d.book_code,
@@ -151,7 +153,7 @@ LEFT JOIN (
       AND d.fiscal_year::varchar = :fiscal_year
 ) sub ON b.book_code = sub.book_code
 WHERE 1=1 $extra_where
-GROUP BY b.book_name, b.book_code, b.class_level, b.is_translated, sub.deno_year, sub.month_num
+GROUP BY b.book_name, b.book_code, b.class_level, b.is_translated, t.title_code, sub.deno_year, sub.month_num
 ORDER BY b.is_translated DESC, b.class_level, b.book_name
 ";
 
@@ -211,6 +213,7 @@ foreach ($raw_data as $row) {
         $books_data[$bk] = [
             'book_name'     => $row['book_name'],
             'book_code'     => $bk,
+            'title_code'    => $row['title_code'] ?? null,
             'class_level'   => $row['class_level'],
             'is_translated' => $row['is_translated'],
             'slots'         => array_fill_keys($slot_keys, 0),
@@ -382,6 +385,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;margin:0;padding:0;
   .report-header h2{font-size:8pt;margin:.5mm 0}
   .report-header p{font-size:6.5pt;margin:.5mm 0}
   .report-table thead,.report-table tfoot{position:static}
+  /* Don't repeat the column header row on every printed page, and don't
+     repeat the tfoot's duplicate totals row — the GRAND TOTAL row already
+     printed once at the end of the table (in tbody) is enough. */
+  .report-table thead{display:table-row-group}
+  .report-table tfoot{display:none}
   .report-table{font-size:6pt;border-collapse:collapse}
   .report-table th{font-size:6pt;background:#ddd!important;color:#000!important;border:.4px solid #555;padding:.5mm .2mm}
   .report-table td{border:.4px solid #999;padding:.3mm .1mm;font-size:7pt;font-weight:600}
@@ -491,7 +499,7 @@ foreach ($translated_books as $book):
 <tr>
   <td><?= $sn++ ?></td>
   <td class="book-name"><?= htmlspecialchars($book['book_name']) ?></td>
-  <td style="font-size:7pt"><?= htmlspecialchars($book['book_code']) ?></td>
+  <td style="font-size:7pt"><?= htmlspecialchars($book['book_code']) ?><?php if (!empty($book['title_code'])): ?><br><span style="color:#0d6efd;font-size:6pt">Title: <?= htmlspecialchars($book['title_code']) ?></span><?php endif; ?></td>
   <td><?= $book['class_level'] ?></td>
   <?php foreach ($fiscal_months as $fm):
     $sk = $fm[1] . '-' . $fm[2];
@@ -525,7 +533,7 @@ foreach ($non_translated_books as $book):
 <tr>
   <td><?= $sn++ ?></td>
   <td class="book-name"><?= htmlspecialchars($book['book_name']) ?></td>
-  <td style="font-size:7pt"><?= htmlspecialchars($book['book_code']) ?></td>
+  <td style="font-size:7pt"><?= htmlspecialchars($book['book_code']) ?><?php if (!empty($book['title_code'])): ?><br><span style="color:#0d6efd;font-size:6pt">Title: <?= htmlspecialchars($book['title_code']) ?></span><?php endif; ?></td>
   <td><?= $book['class_level'] ?></td>
   <?php foreach ($fiscal_months as $fm):
     $sk = $fm[1] . '-' . $fm[2];

@@ -15,10 +15,21 @@ $is_optional_filter   = isset($_GET['is_optional'])   ? $_GET['is_optional']    
 $search_text          = isset($_GET['search'])        ? trim($_GET['search'])        : '';
 $business_filter      = isset($_GET['business'])      ? trim($_GET['business'])      : '';
 $book_type_filter     = isset($_GET['book_type'])     ? trim($_GET['book_type'])     : '';
+// Default view hides obsolete/superseded editions ("Active" only) — they're
+// never deleted, still fully visible in every report, just out of the way
+// of the day-to-day list. "status=all"/"inactive" override this.
+$status_filter        = isset($_GET['status'])        ? trim($_GET['status'])        : 'active';
 
 // Build WHERE clause
 $where_conditions = [];
 $filter_params    = [];
+
+if ($status_filter === 'active') {
+    $where_conditions[] = "b.is_active = true";
+} elseif ($status_filter === 'inactive') {
+    $where_conditions[] = "b.is_active = false";
+}
+// $status_filter === 'all' -> no filter
 
 if (!empty($book_code_filter)) {
     $where_conditions[] = "book_code ILIKE ?";
@@ -64,7 +75,7 @@ if (isset($_GET['export'])) {
                b.is_translated, b.is_optional, b.created_at,
                u1.username as created_by_name
         FROM books b
-        LEFT JOIN users u1 ON b.created_by = u1.username
+        LEFT JOIN users u1 ON b.created_by_id = u1.id
         ORDER BY b.created_at DESC
     ";
     $export_stmt = $conn->prepare($export_query);
@@ -180,7 +191,7 @@ $current_page   = isset($_GET['page']) ? max(1, (int)$_GET['page']) : 1;
 $offset         = ($current_page - 1) * $items_per_page;
 
 // Total count
-$count_query = "SELECT COUNT(*) as total FROM books $where_clause";
+$count_query = "SELECT COUNT(*) as total FROM books b $where_clause";
 $count_stmt  = $conn->prepare($count_query);
 $count_stmt->execute($filter_params);
 $total_records = $count_stmt->fetch()['total'];
@@ -190,9 +201,11 @@ if ($current_page > $total_pages) { $current_page = $total_pages; $offset = ($cu
 // Paged query
 $page_params = array_merge($filter_params, [$items_per_page, $offset]);
 $books_query = "
-    SELECT b.*, u1.username as created_by_name
+    SELECT b.*, u1.username as created_by_name,
+           t.title_code, t.title_name
     FROM books b
-    LEFT JOIN users u1 ON b.created_by = u1.username
+    LEFT JOIN users u1 ON b.created_by_id = u1.id
+    LEFT JOIN book_titles t ON b.title_id = t.id
     $where_clause
     ORDER BY b.created_at DESC
     LIMIT ? OFFSET ?
@@ -226,11 +239,16 @@ $base_url = '?' . http_build_query($query_no_page) . '&page=';
                 </ol>
             </nav>
         </div>
-        <?php if (has_role('editor') || has_role('admin')): ?>
-            <a href="create.php" class="btn btn-primary px-4">
-                <i class="fas fa-plus-circle me-2"></i>Add New Book
+        <div class="d-flex gap-2">
+            <a href="title_report.php" class="btn btn-outline-primary px-4">
+                <i class="fas fa-chart-bar me-2"></i>Lifetime by Title
             </a>
-        <?php endif; ?>
+            <?php if (has_role('editor') || has_role('admin')): ?>
+                <a href="create.php" class="btn btn-primary px-4">
+                    <i class="fas fa-plus-circle me-2"></i>Add New Book
+                </a>
+            <?php endif; ?>
+        </div>
     </div>
 
     <!-- Alerts -->
@@ -329,6 +347,14 @@ $base_url = '?' . http_build_query($query_no_page) . '&page=';
                             <option value="0" <?= $is_optional_filter === '0' ? 'selected' : '' ?>>No</option>
                         </select>
                     </div>
+                    <div class="col-md-1">
+                        <label class="form-label fw-semibold small">Status</label>
+                        <select class="form-select form-select-sm" name="status">
+                            <option value="active"   <?= $status_filter === 'active'   ? 'selected' : '' ?>>Active</option>
+                            <option value="inactive" <?= $status_filter === 'inactive' ? 'selected' : '' ?>>Obsolete</option>
+                            <option value="all"      <?= $status_filter === 'all'      ? 'selected' : '' ?>>All</option>
+                        </select>
+                    </div>
                     <div class="col-md-1 d-flex align-items-end">
                         <button type="submit" class="btn btn-primary btn-sm w-100">
                             <i class="fas fa-search"></i>
@@ -382,12 +408,15 @@ $base_url = '?' . http_build_query($query_no_page) . '&page=';
                         <th>#</th>
                         <th>Book Code</th>
                         <th>Book Name</th>
+                        <th>Title</th>
                         <th>Class</th>
                         <th>Fiscal Year</th>
+                        <th>Pages</th>
                         <th>Business</th>
                         <th>Type</th>
                         <th>Tr.</th>
                         <th>Opt.</th>
+                        <th>Status</th>
                         <th>Created By</th>
                         <th>Date</th>
                         <th class="text-center">Actions</th>
@@ -396,7 +425,7 @@ $base_url = '?' . http_build_query($query_no_page) . '&page=';
                 <tbody>
                     <?php if (empty($books)): ?>
                         <tr>
-                            <td colspan="12" class="text-center py-5 text-muted">
+                            <td colspan="15" class="text-center py-5 text-muted">
                                 <i class="fas fa-inbox fa-3x mb-3 d-block"></i>
                                 No books found matching your criteria.
                             </td>
@@ -409,6 +438,13 @@ $base_url = '?' . http_build_query($query_no_page) . '&page=';
                                 <td class="text-truncate" style="max-width:220px" title="<?= htmlspecialchars($book['book_name']) ?>">
                                     <strong><?= htmlspecialchars($book['book_name']) ?></strong>
                                 </td>
+                                <td class="small">
+                                    <?php if ($book['title_code']): ?>
+                                        <span class="text-primary" title="<?= htmlspecialchars($book['title_name']) ?>"><?= htmlspecialchars($book['title_code']) ?></span>
+                                    <?php else: ?>
+                                        <span class="text-muted">—</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td>
                                     <?php if ($book['class_level']): ?>
                                         <span class="badge bg-secondary">Cls <?= $book['class_level'] ?></span>
@@ -417,6 +453,7 @@ $base_url = '?' . http_build_query($query_no_page) . '&page=';
                                     <?php endif; ?>
                                 </td>
                                 <td class="small"><?= htmlspecialchars($book['fiscal_year'] ?: '—') ?></td>
+                                <td class="small text-center"><?= $book['page_count'] !== null ? (int)$book['page_count'] : '—' ?></td>
                                 <td><span class="badge bg-info text-dark"><?= htmlspecialchars($book['business_associated'] ?? 'CDC') ?></span></td>
                                 <td><span class="badge bg-warning text-dark"><?= htmlspecialchars($book['book_type'] ?? 'TextBook') ?></span></td>
                                 <td class="text-center">
@@ -431,6 +468,13 @@ $base_url = '?' . http_build_query($query_no_page) . '&page=';
                                         <span class="badge bg-info text-dark">Y</span>
                                     <?php else: ?>
                                         <span class="badge bg-light text-muted">N</span>
+                                    <?php endif; ?>
+                                </td>
+                                <td class="text-center">
+                                    <?php if ($book['is_active']): ?>
+                                        <span class="badge bg-success">Active</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-secondary">Obsolete</span>
                                     <?php endif; ?>
                                 </td>
                                 <td class="small text-muted"><?= htmlspecialchars($book['created_by_name'] ?? '—') ?></td>

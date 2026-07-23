@@ -81,16 +81,17 @@ $where_sql = $where ? 'AND ' . implode(' AND ', $where) : '';
  */
 $sql = "
 SELECT
-    b.book_name, b.book_code, b.class_level, b.is_translated,
+    b.book_name, b.book_code, b.class_level, b.is_translated, t.title_code,
     LPAD(SPLIT_PART(d.deno_date_nep, '.', 3), 2, '0') AS day,
     COALESCE(SUM(d.total_qty), 0) AS total_produced
 FROM Books b
+LEFT JOIN book_titles t ON b.title_id = t.id
 LEFT JOIN Deno d ON b.book_code = d.book_code
     AND d.deleted_at IS NULL
     AND d.fiscal_year::varchar = :fiscal_year
     AND LPAD(SPLIT_PART(d.deno_date_nep, '.', 2), 2, '0') = :month
 $where_sql
-GROUP BY b.book_name, b.book_code, b.class_level, b.is_translated, day
+GROUP BY b.book_name, b.book_code, b.class_level, b.is_translated, t.title_code, day
 ORDER BY b.is_translated DESC, b.class_level, b.book_name, day
 ";
 
@@ -123,6 +124,7 @@ foreach ($data as $r) {
         $arr[$r['book_code']] = [
             'name'  => $r['book_name'],
             'code'  => $r['book_code'],
+            'title' => $r['title_code'] ?? null,
             'class' => $r['class_level'],
             'days'  => $days,
             'total' => 0,
@@ -196,6 +198,11 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;margin:0;padding:0;
   .report-header h2{font-size:8pt;margin:.5mm 0}
   .report-header p{font-size:6.5pt;margin:.5mm 0}
   .report-table thead,.report-table tfoot{position:static}
+  /* Don't repeat the column header row on every printed page, and don't
+     repeat the tfoot's duplicate totals row — the GRAND TOTAL row already
+     printed once at the end of the table (in tbody) is enough. */
+  .report-table thead{display:table-row-group}
+  .report-table tfoot{display:none}
   .report-table{font-size:6pt;border-collapse:collapse}
   .report-table th{font-size:6pt;background:#ddd!important;color:#000!important;border:.4px solid #555;padding:.5mm .2mm}
   .report-table td{border:.4px solid #999;padding:.3mm .1mm;font-size:7pt;font-weight:600}
@@ -296,7 +303,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;margin:0;padding:0;
 <tr>
   <td><?= $sn++ ?></td>
   <td class="book-name"><?= htmlspecialchars($b['name']) ?></td>
-  <td style="font-size:7pt"><?= htmlspecialchars($b['code']) ?></td>
+  <td style="font-size:7pt"><?= htmlspecialchars($b['code']) ?><?php if (!empty($b['title'])): ?><br><span style="color:#0d6efd;font-size:6pt">Title: <?= htmlspecialchars($b['title']) ?></span><?php endif; ?></td>
   <td><?= $b['class'] ?></td>
   <?php foreach ($b['days'] as $v) echo '<td class="qty-val">' . ($v ?: '-') . '</td>'; ?>
   <td><strong><?= $b['total'] ?></strong></td>
@@ -317,7 +324,7 @@ body{font-family:'Segoe UI',Arial,sans-serif;background:#fff;margin:0;padding:0;
 <tr>
   <td><?= $sn++ ?></td>
   <td class="book-name"><?= htmlspecialchars($b['name']) ?></td>
-  <td style="font-size:7pt"><?= htmlspecialchars($b['code']) ?></td>
+  <td style="font-size:7pt"><?= htmlspecialchars($b['code']) ?><?php if (!empty($b['title'])): ?><br><span style="color:#0d6efd;font-size:6pt">Title: <?= htmlspecialchars($b['title']) ?></span><?php endif; ?></td>
   <td><?= $b['class'] ?></td>
   <?php foreach ($b['days'] as $v) echo '<td class="qty-val">' . ($v ?: '-') . '</td>'; ?>
   <td><strong><?= $b['total'] ?></strong></td>

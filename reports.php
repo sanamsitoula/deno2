@@ -697,6 +697,10 @@ if ($_SESSION['user_role'] === 'admin') {
                         <i class="bi bi-book"></i>
                         <span>Books Report</span>
                     </a>
+                    <a href="<?= getUrl('book/title_report.php') ?>" class="report-link">
+                        <i class="bi bi-layers"></i>
+                        <span>Lifetime by Title</span>
+                    </a>
                     <a href="<?= getUrl('denoreports/translated.php') ?>" class="report-link">
                         <i class="bi bi-translate"></i>
                         <span>Translated Report</span>
