@@ -263,9 +263,14 @@ document.addEventListener('DOMContentLoaded', function() {
 
 <?php
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/vendor/autoload.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
-$date               = $_GET['date']               ?? '2082.04.07';
+use Administrator\Deno2\Shared\DateConverter;
+
+// Default to today's Nepali (BS) date instead of a fixed placeholder date
+$todayBs = str_replace('-', '.', DateConverter::todayBs());
+$date               = $_GET['date']               ?? $todayBs;
 $translation_filter = $_GET['translation_filter'] ?? 'all';
 $book_code_filter   = $_GET['book_code_filter']   ?? '';
 $class_filter       = $_GET['class_filter']       ?? '';
