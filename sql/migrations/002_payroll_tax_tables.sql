@@ -75,9 +75,12 @@ CREATE TABLE IF NOT EXISTS employee_tax_records (
 );
 
 -- ── Extend payroll_processing (add columns if missing) ──────────────────────
+-- Skipped if the table doesn't exist yet — 002b_create_payroll_tables.sql
+-- creates it from scratch with these columns already included.
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='payroll_processing')
+       AND NOT EXISTS (SELECT 1 FROM information_schema.columns
                    WHERE table_name='payroll_processing' AND column_name='total_gross') THEN
         ALTER TABLE payroll_processing
             ADD COLUMN total_gross       NUMERIC(14,2) DEFAULT 0,
@@ -97,7 +100,8 @@ END $$;
 -- Status constraint on payroll_processing
 DO $$
 BEGIN
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payroll_processing_status_check') THEN
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='payroll_processing')
+       AND NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'payroll_processing_status_check') THEN
         ALTER TABLE payroll_processing
             ADD CONSTRAINT payroll_processing_status_check
             CHECK (status IN ('DRAFT','CALCULATED','APPROVED','PAID','LOCKED'));
@@ -129,13 +133,15 @@ DECLARE cols TEXT[] := ARRAY[
 col_def TEXT;
 col_name TEXT;
 BEGIN
-    FOREACH col_def IN ARRAY cols LOOP
-        col_name := split_part(trim(col_def), ' ', 1);
-        IF NOT EXISTS (SELECT 1 FROM information_schema.columns
-                       WHERE table_name='payroll_details' AND column_name=col_name) THEN
-            EXECUTE 'ALTER TABLE payroll_details ADD COLUMN ' || col_def;
-        END IF;
-    END LOOP;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name='payroll_details') THEN
+        FOREACH col_def IN ARRAY cols LOOP
+            col_name := split_part(trim(col_def), ' ', 1);
+            IF NOT EXISTS (SELECT 1 FROM information_schema.columns
+                           WHERE table_name='payroll_details' AND column_name=col_name) THEN
+                EXECUTE 'ALTER TABLE payroll_details ADD COLUMN ' || col_def;
+            END IF;
+        END LOOP;
+    END IF;
 END $$;
 
 -- ── Seed: Nepal income tax slabs FY 2081/82 ─────────────────────────────────
