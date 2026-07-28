@@ -34,17 +34,16 @@ try {
         INNER JOIN fiscal_years fy ON jt.fiscal_year_id = fy.id
         LEFT JOIN books b ON jt.book_id = b.book_id
         WHERE jt.id = :job_ticket_id
-        AND fy.is_active = true
     ");
-    
+
     $jtStmt->execute([':job_ticket_id' => $job_ticket_id]);
     $jobTicket = $jtStmt->fetch(PDO::FETCH_ASSOC);
-    
+
     if (!$jobTicket) {
         http_response_code(404);
         echo json_encode([
-            'error' => 'Job Ticket not found or not in active fiscal year',
-            'message' => 'The specified job ticket does not exist or belongs to an inactive fiscal year'
+            'error' => 'Job Ticket not found',
+            'message' => 'The specified job ticket does not exist'
         ]);
         exit;
     }
@@ -238,7 +237,7 @@ try {
         ],
         'forma_details' => $formattedDetails,
         'has_formas' => count($formattedDetails) > 0,
-        'fiscal_year_active' => true, // Already filtered for active fiscal year
+        'fiscal_year_active' => (bool)$jobTicket['fiscal_year_active'],
         'timestamp' => date('Y-m-d H:i:s')
     ];
     
