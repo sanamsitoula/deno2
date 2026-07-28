@@ -153,7 +153,9 @@ $current_fiscal_year = $conn->query("
 // Get all fiscal years for dropdown
 $fiscal_years = $conn->query("SELECT id, fiscal_code FROM fiscal_years ORDER BY fiscal_code DESC")->fetchAll(PDO::FETCH_ASSOC);
 
-// Get job tickets with book information from active fiscal year only
+// Get job tickets with book information — not restricted to the active
+// fiscal year, since work on a job ticket often carries over into the next
+// fiscal year and still needs to show up here until it's actually completed.
 $job_tickets = $conn->query("
     SELECT 
         jt.id, 
@@ -170,7 +172,6 @@ $job_tickets = $conn->query("
     LEFT JOIN books b ON jt.book_id = b.book_id
     INNER JOIN fiscal_years fy ON jt.fiscal_year_id = fy.id
     WHERE jt.status IN ('active', 'processing','pending')
-    AND fy.is_active = true
     ORDER BY jt.job_ticket_code DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 

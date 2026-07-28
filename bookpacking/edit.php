@@ -107,14 +107,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Get data for form dropdowns
-$job_tickets = $conn->query("
+// Get data for form dropdowns — only tickets whose work isn't completed yet,
+// plus whichever ticket this packing record is already assigned to (so
+// editing an older record doesn't lose its selection if that ticket has
+// since been marked bp_completed).
+$jt_stmt = $conn->prepare("
     SELECT jt.id, jt.job_ticket_code, jt.lot, jt.print_qty, b.book_name, b.book_code, b.class_level
     FROM job_ticket jt
     LEFT JOIN books b ON jt.book_id = b.book_id
-  --  WHERE jt.status = true
+    WHERE jt.status IN ('active', 'pending') OR jt.status IS NULL OR jt.id = :current_jt_id
     ORDER BY jt.created_date DESC
-")->fetchAll(PDO::FETCH_ASSOC);
+");
+$jt_stmt->execute([':current_jt_id' => $packing['jt_id']]);
+$job_tickets = $jt_stmt->fetchAll(PDO::FETCH_ASSOC);
 
 $fiscal_years = $conn->query("SELECT id, fiscal_code FROM fiscal_years ORDER BY fiscal_code DESC")->fetchAll(PDO::FETCH_ASSOC);
 
