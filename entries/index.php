@@ -40,14 +40,6 @@ $records_per_page = 50;
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $offset = ($page - 1) * $records_per_page;
 
-// Default date range — Shrawan 1 to next Ashadh end of whichever fiscal year
-// is currently active (config/functions.php::getActiveFiscalDateRange).
-// Changing the active fiscal year in Setup > Fiscal Years automatically moves
-// this default on next page load, no hardcoded year.
-$active_fy_range = getActiveFiscalDateRange($conn);
-$start_date = isset($_GET['start_date']) ? $_GET['start_date'] : $active_fy_range['start'];
-$end_date = isset($_GET['end_date']) ? $_GET['end_date'] : $active_fy_range['end'];
-
 // Fiscal years for the filter dropdown — defaults to whichever is currently active
 $fiscal_years_list = $conn->query("
     SELECT id, fiscal_code, fiscal_name, is_active
@@ -55,7 +47,35 @@ $fiscal_years_list = $conn->query("
     ORDER BY start_date DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
 
+$active_fy_range = getActiveFiscalDateRange($conn);
 $active_fy_id = $active_fy_range['fiscal_year_id'] ?? '';
+
+// Defaults to the active fiscal year on first load; isset() so an explicit
+// "All Fiscal Years" choice (empty string) doesn't get overridden back to active.
+$selected_fy_id = isset($_GET['fiscal_year_id']) ? $_GET['fiscal_year_id'] : $active_fy_id;
+
+// Default date range follows whichever fiscal year is SELECTED, not always the
+// active one — otherwise picking an older fiscal year from the dropdown still
+// combined with the active year's Shrawan-to-Ashadh bounds and returned zero
+// rows. "All Fiscal Years" (explicit empty selection) leaves dates unbound so
+// every year's records show unless the user types an explicit date range.
+$start_date = $_GET['start_date'] ?? '';
+$end_date = $_GET['end_date'] ?? '';
+if ($start_date === '' && $end_date === '') {
+    if (!empty($selected_fy_id)) {
+        foreach ($fiscal_years_list as $fy) {
+            if ((string)$fy['id'] === (string)$selected_fy_id) {
+                $start_date = $fy['fiscal_code'] . '.04.01';
+                $end_date = ((int)$fy['fiscal_code'] + 1) . '.03.32';
+                break;
+            }
+        }
+    } elseif (!isset($_GET['fiscal_year_id'])) {
+        // Very first page load, no filters applied yet
+        $start_date = $active_fy_range['start'];
+        $end_date = $active_fy_range['end'];
+    }
+}
 
 // Get search parameters
 $search_params = [
@@ -64,9 +84,7 @@ $search_params = [
     'translated' => $_GET['translated'] ?? '',
     'ref_no' => $_GET['ref_no'] ?? '',
     'deno_no' => $_GET['deno_no'] ?? '',
-    // Defaults to the active fiscal year on first load; isset() so an explicit
-    // "All Fiscal Years" choice (empty string) doesn't get overridden back to active.
-    'fiscal_year_id' => isset($_GET['fiscal_year_id']) ? $_GET['fiscal_year_id'] : $active_fy_id,
+    'fiscal_year_id' => $selected_fy_id,
     'start_date' => $start_date,
     'end_date' => $end_date
 ];
@@ -140,10 +158,13 @@ if (!empty($search_params['fiscal_year_id'])) {
     $bind_params[':fiscal_year_id'] = $search_params['fiscal_year_id'];
 }
 
-// Add date range condition
-$conditions .= " AND d.deno_date_nep BETWEEN :start_date AND :end_date";
-$bind_params[':start_date'] = $search_params['start_date'];
-$bind_params[':end_date'] = $search_params['end_date'];
+// Add date range condition (optional — "All Fiscal Years" with no explicit
+// dates leaves this off entirely so older records aren't hidden)
+if (!empty($search_params['start_date']) && !empty($search_params['end_date'])) {
+    $conditions .= " AND d.deno_date_nep BETWEEN :start_date AND :end_date";
+    $bind_params[':start_date'] = $search_params['start_date'];
+    $bind_params[':end_date'] = $search_params['end_date'];
+}
 
 // Apply conditions to both queries
 $count_query .= $conditions;
@@ -1052,6 +1073,15 @@ document.getElementById('class_level').addEventListener('change', function() {
 });
 
 document.getElementById('translated').addEventListener('change', function() {
+    document.getElementById('searchForm').submit();
+});
+
+// Switching fiscal year: clear the date inputs first so the server recomputes
+// the date range for the newly selected year instead of resending the old
+// year's dates (which would hide the new year's records again).
+document.getElementById('fiscal_year_id').addEventListener('change', function() {
+    document.getElementById('start_date').value = '';
+    document.getElementById('end_date').value = '';
     document.getElementById('searchForm').submit();
 });
 

@@ -76,11 +76,40 @@ $records_per_page = 50;
 $page = isset($_GET['page']) ? (int)$_GET['page'] : 1;
 $offset = ($page - 1) * $records_per_page;
 
-// Default date range follows whichever fiscal year is currently active
-// (config/functions.php::getActiveFiscalDateRange) — no hardcoded year.
+// Fiscal years for the filter dropdown — defaults to whichever is currently active
+$fiscal_years_list = $conn->query("
+    SELECT id, fiscal_code, fiscal_name, is_active
+    FROM fiscal_years
+    ORDER BY start_date DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
 $active_fy_range = getActiveFiscalDateRange($conn);
-$start_date = isset($_GET['start_date']) ? $_GET['start_date'] : $active_fy_range['start'];
-$end_date = isset($_GET['end_date']) ? $_GET['end_date'] : $active_fy_range['end'];
+$active_fy_id = $active_fy_range['fiscal_year_id'] ?? '';
+
+// Defaults to the active fiscal year on first load; isset() so an explicit
+// "All Fiscal Years" choice (empty string) doesn't get overridden back to active.
+$selected_fy_id = isset($_GET['fiscal_year_id']) ? $_GET['fiscal_year_id'] : $active_fy_id;
+
+// Default date range follows whichever fiscal year is SELECTED, not always the
+// active one — otherwise picking an older fiscal year still combined with the
+// active year's date bounds and returned zero rows. "All Fiscal Years" leaves
+// dates unbound so every year's records show unless dates are typed explicitly.
+$start_date = $_GET['start_date'] ?? '';
+$end_date = $_GET['end_date'] ?? '';
+if ($start_date === '' && $end_date === '') {
+    if (!empty($selected_fy_id)) {
+        foreach ($fiscal_years_list as $fy) {
+            if ((string)$fy['id'] === (string)$selected_fy_id) {
+                $start_date = $fy['fiscal_code'] . '.04.01';
+                $end_date = ((int)$fy['fiscal_code'] + 1) . '.03.32';
+                break;
+            }
+        }
+    } elseif (!isset($_GET['fiscal_year_id'])) {
+        $start_date = $active_fy_range['start'];
+        $end_date = $active_fy_range['end'];
+    }
+}
 
 $search_params = [
     'd2m_no' => $_GET['d2m_no'] ?? '',
@@ -88,6 +117,7 @@ $search_params = [
     'status' => $_GET['status'] ?? '',
     'book_code' => $_GET['book_code'] ?? '',
     'ref_no' => $_GET['ref_no'] ?? '',
+    'fiscal_year_id' => $selected_fy_id,
     'start_date' => $start_date,
     'end_date' => $end_date
 ];
@@ -157,9 +187,18 @@ if (!empty($search_params['ref_no'])) {
     $bind_params[':ref_no'] = '%' . $search_params['ref_no'] . '%';
 }
 
-$conditions .= " AND d.nep_date BETWEEN :start_date AND :end_date";
-$bind_params[':start_date'] = $search_params['start_date'];
-$bind_params[':end_date'] = $search_params['end_date'];
+if (!empty($search_params['fiscal_year_id'])) {
+    $conditions .= " AND d.fiscal_year_id = :fiscal_year_id";
+    $bind_params[':fiscal_year_id'] = $search_params['fiscal_year_id'];
+}
+
+// Date range condition (optional — "All Fiscal Years" with no explicit dates
+// leaves this off entirely so older records aren't hidden)
+if (!empty($search_params['start_date']) && !empty($search_params['end_date'])) {
+    $conditions .= " AND d.nep_date BETWEEN :start_date AND :end_date";
+    $bind_params[':start_date'] = $search_params['start_date'];
+    $bind_params[':end_date'] = $search_params['end_date'];
+}
 
 $count_query .= $conditions;
 $query .= $conditions;
@@ -624,8 +663,21 @@ h2 {
                         <option value="CLOSE" <?= $search_params['status'] === 'CLOSE' ? 'selected' : '' ?>>Closed</option>
                     </select>
                 </div>
+
+                <div class="search-group">
+                    <label for="fiscal_year_id">📅 Fiscal Year:</label>
+                    <select name="fiscal_year_id" id="fiscal_year_id" class="search-control">
+                        <option value="">All Fiscal Years</option>
+                        <?php foreach ($fiscal_years_list as $fy): ?>
+                            <option value="<?= $fy['id'] ?>"
+                                    <?= (string)$search_params['fiscal_year_id'] === (string)$fy['id'] ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($fy['fiscal_name'] ?? $fy['fiscal_code']) ?><?= $fy['is_active'] ? ' (Active)' : '' ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
             </div>
-            
+
             <div class="search-row">
                 <div class="search-group">
                     <label for="start_date">📅 Start Date (YYYY.MM.DD):</label>
@@ -941,6 +993,15 @@ document.getElementById('status').addEventListener('change', function() {
 });
 
 document.getElementById('d2m_type').addEventListener('change', function() {
+    document.getElementById('searchForm').submit();
+});
+
+// Switching fiscal year: clear the date inputs first so the server recomputes
+// the date range for the newly selected year instead of resending the old
+// year's dates (which would hide the new year's records again).
+document.getElementById('fiscal_year_id').addEventListener('change', function() {
+    document.getElementById('start_date').value = '';
+    document.getElementById('end_date').value = '';
     document.getElementById('searchForm').submit();
 });
 </script>
