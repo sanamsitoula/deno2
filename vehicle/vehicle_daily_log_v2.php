@@ -175,6 +175,19 @@ while ($row = $assign_query->fetch(PDO::FETCH_ASSOC)) {
     ];
 }
 
+// Latest known end meter per vehicle (used to auto-fill next log's start meter,
+// e.g. Falgun's start meter = Magh's end meter)
+$vehicle_last_meter = [];
+$lm_stmt = $conn->query("
+    SELECT DISTINCT ON (vehicle_id) vehicle_id, end_meter
+    FROM vehicle_daily_logs
+    WHERE deleted_at IS NULL
+    ORDER BY vehicle_id, log_date_eng DESC, log_id DESC
+");
+foreach ($lm_stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+    $vehicle_last_meter[$row['vehicle_id']] = (int)$row['end_meter'];
+}
+
 // Fetch logs with filters
 $filter_fiscal  = $_GET['fiscal_year'] ?? '2082/83';
 $filter_month   = $_GET['month_nep']   ?? '';
@@ -226,6 +239,7 @@ $stmt->execute($params);
 $logs = $stmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
+<link href="https://nepalidatepicker.sajanmaharjan.com.np/v5/nepali.datepicker/css/nepali.datepicker.v5.0.6.min.css" rel="stylesheet"/>
 <style>
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -347,8 +361,11 @@ body {
 
                 <div class="form-group">
                     <label class="form-label required">Start Meter (KM)</label>
-                    <input type="number" name="start_meter" id="start_meter" 
+                    <input type="number" name="start_meter" id="start_meter"
                            class="form-input" step="1" min="0" required>
+                    <small style="color:#6c757d;margin-top:4px" id="start_meter_hint">
+                        Auto-filled from the vehicle's last logged end meter (editable)
+                    </small>
                 </div>
 
                 <div class="form-group">
@@ -534,9 +551,13 @@ body {
     </div>
 </div>
 
+<script src="https://nepalidatepicker.sajanmaharjan.com.np/v5/nepali.datepicker/js/nepali.datepicker.v5.0.6.min.js"></script>
 <script>
 // Vehicle assignments for auto-filling driver
 const vehicleAssignments = <?= json_encode($vehicle_assignments) ?>;
+
+// Latest known end meter per vehicle — used to auto-fill start meter
+const vehicleLastMeter = <?= json_encode($vehicle_last_meter) ?>;
 
 // Month name lookup
 const nepMonths = {
@@ -555,21 +576,45 @@ document.addEventListener('DOMContentLoaded', function () {
     const nepDateInput    = document.getElementById('log_date_nep');
     const monthPreview    = document.getElementById('nep_month_preview');
 
-    // Auto-fill current driver when vehicle is selected
+    // Auto-fill current driver + previous end meter when vehicle is selected
     vehicleSelect.addEventListener('change', function () {
         const vid = this.value;
         if (vid && vehicleAssignments[vid]) {
             driverSelect.value = vehicleAssignments[vid].driver_id;
         }
+        if (vid && vehicleLastMeter[vid] !== undefined) {
+            startMeter.value = vehicleLastMeter[vid];
+            recalculate();
+        }
     });
 
     // Show month name preview as user types Nepali date
-    nepDateInput.addEventListener('input', function () {
-        const val = this.value.replace(/-/g, '.').replace(/\//g, '.');
+    function updateMonthPreview() {
+        const val = nepDateInput.value.replace(/-/g, '.').replace(/\//g, '.');
         const parts = val.split('.');
         const mNum = parts.length >= 2 ? parseInt(parts[1], 10) : 0;
         monthPreview.textContent = nepMonths[mNum] || '—';
-    });
+    }
+    nepDateInput.addEventListener('input', updateMonthPreview);
+
+    // Nepali calendar dialog + auto-detect English (AD) date on selection
+    const logDateEng = document.getElementById('log_date_eng');
+    function updateEngFromNep() {
+        const val = nepDateInput.value.trim();
+        if (!val) return;
+        try {
+            const adDot = NepaliFunctions.BS2AD(val, 'YYYY.MM.DD', 'YYYY.MM.DD');
+            if (adDot) logDateEng.value = adDot.replace(/\./g, '-');
+        } catch (e) {}
+        updateMonthPreview();
+    }
+    if (typeof nepDateInput.NepaliDatePicker === 'function') {
+        nepDateInput.NepaliDatePicker({
+            dateFormat: 'YYYY.MM.DD',
+            onDateSelect: updateEngFromNep
+        });
+    }
+    nepDateInput.addEventListener('blur', updateEngFromNep);
 
     // Calculate distance (end - start)
     function recalculate() {

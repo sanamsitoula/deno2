@@ -504,7 +504,8 @@ if (($_GET['export'] ?? '') === 'xlsx') {
         'Avg km/L','Std km/L','Performance'
     ];
     foreach ($flat as $i => $s) {
-        $avg = ($s['total_km']>0&&$s['total_qty']>0) ? round($s['total_km']/$s['total_qty'],2) : '';
+        $fuel_qty = $s['petrol_qty'] + $s['diesel_qty'];
+        $avg = ($s['total_km']>0&&$fuel_qty>0) ? round($s['total_km']/$fuel_qty,2) : '';
         $std = $s['fuel_std'] ?? 11.5;
         $perf = $avg==='' ? '' : ($avg>=$std ? 'On/Above Std' : 'Below Std');
         $rows[] = [
@@ -761,7 +762,10 @@ PYEOF;
     <div class="sc"><div class="sl">Total Cost</div><div class="sv" style="color:#007bff">रू <?=number_format($gt_amt,2)?></div></div>
     <div class="sc"><div class="sl">Total KM</div><div class="sv"><?=number_format($gt_km)?></div></div>
     <div class="sc"><div class="sl">Below Std</div><div class="sv" style="color:#dc3545">
-        <?=count(array_filter($flat,fn($r)=>$r['total_km']>0&&$r['total_qty']>0&&($r['total_km']/$r['total_qty'])<($r['fuel_std']??11.5)))?>
+        <?=count(array_filter($flat,function($r){
+            $fq=$r['petrol_qty']+$r['diesel_qty'];
+            return $r['total_km']>0&&$fq>0&&($r['total_km']/$fq)<($r['fuel_std']??11.5);
+        }))?>
     </div></div>
 </div>
 
@@ -866,7 +870,8 @@ PYEOF;
         </td></tr>
     <?php else: ?>
     <?php foreach($flat as $i=>$s):
-        $avg = ($s['total_km']>0&&$s['total_qty']>0) ? $s['total_km']/$s['total_qty'] : 0;
+        $fuel_qty = $s['petrol_qty'] + $s['diesel_qty'];
+        $avg = ($s['total_km']>0&&$fuel_qty>0) ? $s['total_km']/$fuel_qty : 0;
         $std = (float)($s['fuel_std']??11.5);
         $perf= $avg==0?'—':($avg>=$std?'On/Above Std':'Below Std');
         $pc  = $avg==0?'#888':($avg>=$std?'#137333':'#c0392b');
