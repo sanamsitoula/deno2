@@ -36,39 +36,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? 'create';
         
         if ($action === 'create') {
-            $required_fields = ['vehicle_id', 'log_date_nep', 'log_date_eng', 'start_meter', 'end_meter', 'fiscal_year'];
-            
+            $required_fields = ['vehicle_id', 'log_date_nep', 'log_date_eng', 'log_end_date_nep', 'log_end_date_eng', 'start_meter', 'end_meter', 'fiscal_year'];
+
             foreach ($required_fields as $field) {
                 if (empty($_POST[$field])) {
                     throw new Exception("Field '{$field}' is required");
                 }
             }
-            
+
             if ((int)$_POST['end_meter'] < (int)$_POST['start_meter']) {
                 throw new Exception("End meter reading cannot be less than start meter reading.");
             }
-            
+            if ($_POST['log_end_date_eng'] < $_POST['log_date_eng']) {
+                throw new Exception("To date cannot be earlier than From date.");
+            }
+
             // Derive month_nep reliably — supports 2082.12.01 and 2082-12-01
             $month_nep = get_month_nep_from_date($_POST['log_date_nep']);
-            
+
             $insert_sql = "
                 INSERT INTO vehicle_daily_logs (
                     vehicle_id, driver_id, log_date_nep, log_date_eng,
+                    log_end_date_nep, log_end_date_eng,
                     from_location, to_location, start_meter, end_meter,
                     purpose, fuel_used_estimated, remarks, fiscal_year, month_nep, created_by
                 ) VALUES (
                     :vehicle_id, :driver_id, :log_date_nep, :log_date_eng,
+                    :log_end_date_nep, :log_end_date_eng,
                     :from_location, :to_location, :start_meter, :end_meter,
                     :purpose, :fuel_used_estimated, :remarks, :fiscal_year, :month_nep, :created_by
                 )
             ";
-            
+
             $stmt = $conn->prepare($insert_sql);
             $stmt->execute([
                 ':vehicle_id'         => $_POST['vehicle_id'],
                 ':driver_id'          => $_POST['driver_id'] ?: null,
                 ':log_date_nep'       => $_POST['log_date_nep'],
                 ':log_date_eng'       => $_POST['log_date_eng'],
+                ':log_end_date_nep'   => $_POST['log_end_date_nep'],
+                ':log_end_date_eng'   => $_POST['log_end_date_eng'],
                 ':from_location'      => $_POST['from_location'] ?? null,
                 ':to_location'        => $_POST['to_location']   ?? null,
                 ':start_meter'        => (int)$_POST['start_meter'],
@@ -80,22 +87,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':month_nep'          => $month_nep,
                 ':created_by'         => $logged_user_id
             ]);
-            
+
             $success_message = "Vehicle log created successfully!";
-            
+
         } elseif ($action === 'update') {
             if ((int)$_POST['end_meter'] < (int)$_POST['start_meter']) {
                 throw new Exception("End meter reading cannot be less than start meter reading.");
             }
-            
+            if ($_POST['log_end_date_eng'] < $_POST['log_date_eng']) {
+                throw new Exception("To date cannot be earlier than From date.");
+            }
+
             $month_nep = get_month_nep_from_date($_POST['log_date_nep']);
-            
+
             $update_sql = "
-                UPDATE vehicle_daily_logs SET 
+                UPDATE vehicle_daily_logs SET
                     vehicle_id = :vehicle_id,
                     driver_id = :driver_id,
                     log_date_nep = :log_date_nep,
                     log_date_eng = :log_date_eng,
+                    log_end_date_nep = :log_end_date_nep,
+                    log_end_date_eng = :log_end_date_eng,
                     from_location = :from_location,
                     to_location = :to_location,
                     start_meter = :start_meter,
@@ -109,7 +121,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     updated_at = CURRENT_TIMESTAMP
                 WHERE log_id = :log_id
             ";
-            
+
             $stmt = $conn->prepare($update_sql);
             $stmt->execute([
                 ':log_id'             => $_POST['log_id'],
@@ -117,6 +129,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':driver_id'          => $_POST['driver_id'] ?: null,
                 ':log_date_nep'       => $_POST['log_date_nep'],
                 ':log_date_eng'       => $_POST['log_date_eng'],
+                ':log_end_date_nep'   => $_POST['log_end_date_nep'],
+                ':log_end_date_eng'   => $_POST['log_end_date_eng'],
                 ':from_location'      => $_POST['from_location'] ?? null,
                 ':to_location'        => $_POST['to_location']   ?? null,
                 ':start_meter'        => (int)$_POST['start_meter'],
@@ -128,7 +142,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':month_nep'          => $month_nep,
                 ':updated_by'         => $logged_user_id
             ]);
-            
+
             $success_message = "Vehicle log updated successfully!";
             
         } elseif ($action === 'delete') {
@@ -214,6 +228,8 @@ $stmt = $conn->prepare("
         vdl.log_id,
         vdl.log_date_nep,
         vdl.log_date_eng,
+        vdl.log_end_date_nep,
+        vdl.log_end_date_eng,
         vdl.vehicle_id,
         v.vehicle_no,
         v.vehicle_type,
@@ -343,20 +359,33 @@ body {
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label required">Log Date (Nepali)</label>
-                    <input type="text" name="log_date_nep" id="log_date_nep" 
+                    <label class="form-label required">From Date (Nepali)</label>
+                    <input type="text" name="log_date_nep" id="log_date_nep"
                            class="form-input" placeholder="2082-12-01 or 2082.12.01" required>
                     <small style="color:#6c757d;margin-top:4px">
-                        Format: YYYY-MM-DD or YYYY.MM.DD &nbsp;|&nbsp; 
+                        Format: YYYY-MM-DD or YYYY.MM.DD &nbsp;|&nbsp;
                         Month: <span id="nep_month_preview" style="font-weight:600;color:#004085">—</span>
                     </small>
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label required">Log Date (English)</label>
-                    <input type="date" name="log_date_eng" id="log_date_eng" 
+                    <label class="form-label required">From Date (English)</label>
+                    <input type="date" name="log_date_eng" id="log_date_eng"
                            class="form-input" value="<?= date('Y-m-d') ?>" required>
                     <small style="color:#6c757d;margin-top:4px">Default: Today's date</small>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label required">To Date (Nepali)</label>
+                    <input type="text" name="log_end_date_nep" id="log_end_date_nep"
+                           class="form-input" placeholder="2082-12-01 or 2082.12.01" required>
+                    <small style="color:#6c757d;margin-top:4px">For a single-day trip, same as From Date</small>
+                </div>
+
+                <div class="form-group">
+                    <label class="form-label required">To Date (English)</label>
+                    <input type="date" name="log_end_date_eng" id="log_end_date_eng"
+                           class="form-input" value="<?= date('Y-m-d') ?>" required>
                 </div>
 
                 <div class="form-group">
@@ -485,7 +514,7 @@ body {
             <thead>
                 <tr>
                     <th>#</th>
-                    <th>Log Date</th>
+                    <th>Trip Date</th>
                     <th>Month</th>
                     <th>Vehicle</th>
                     <th>Driver</th>
@@ -493,7 +522,7 @@ body {
                     <th>End KM</th>
                     <th>Distance</th>
                     <th>Fuel Used</th>
-                    <th>From → To</th>
+                    <th>Route</th>
                     <th>Purpose</th>
                 </tr>
             </thead>
@@ -509,10 +538,17 @@ body {
                         <tr>
                             <td><?= $idx + 1 ?></td>
                             <td>
-                                <?= htmlspecialchars($log['log_date_nep']) ?><br>
-                                <small style="color:#6c757d">
-                                    <?= date('d M Y', strtotime($log['log_date_eng'])) ?>
-                                </small>
+                                <?php if ($log['log_end_date_eng'] && $log['log_end_date_eng'] !== $log['log_date_eng']): ?>
+                                    <?= htmlspecialchars($log['log_date_nep']) ?> → <?= htmlspecialchars($log['log_end_date_nep']) ?><br>
+                                    <small style="color:#6c757d">
+                                        <?= date('d M', strtotime($log['log_date_eng'])) ?> → <?= date('d M Y', strtotime($log['log_end_date_eng'])) ?>
+                                    </small>
+                                <?php else: ?>
+                                    <?= htmlspecialchars($log['log_date_nep']) ?><br>
+                                    <small style="color:#6c757d">
+                                        <?= date('d M Y', strtotime($log['log_date_eng'])) ?>
+                                    </small>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <?php if ($log['month_nep']): ?>
@@ -598,13 +634,24 @@ document.addEventListener('DOMContentLoaded', function () {
     nepDateInput.addEventListener('input', updateMonthPreview);
 
     // Nepali calendar dialog + auto-detect English (AD) date on selection
-    const logDateEng = document.getElementById('log_date_eng');
+    const logDateEng    = document.getElementById('log_date_eng');
+    const endNepInput   = document.getElementById('log_end_date_nep');
+    const endEngInput   = document.getElementById('log_end_date_eng');
+    let toDateTouched = false;
+
     function updateEngFromNep() {
         const val = nepDateInput.value.trim();
         if (!val) return;
         try {
             const adDot = NepaliFunctions.BS2AD(val, 'YYYY.MM.DD', 'YYYY.MM.DD');
-            if (adDot) logDateEng.value = adDot.replace(/\./g, '-');
+            if (adDot) {
+                logDateEng.value = adDot.replace(/\./g, '-');
+                // Default the To date to the From date until the user picks a different To date
+                if (!toDateTouched) {
+                    endNepInput.value = val;
+                    endEngInput.value = logDateEng.value;
+                }
+            }
         } catch (e) {}
         updateMonthPreview();
     }
@@ -615,6 +662,25 @@ document.addEventListener('DOMContentLoaded', function () {
         });
     }
     nepDateInput.addEventListener('blur', updateEngFromNep);
+
+    // To date: same calendar dialog + auto AD detection
+    function updateEndEngFromNep() {
+        toDateTouched = true;
+        const val = endNepInput.value.trim();
+        if (!val) return;
+        try {
+            const adDot = NepaliFunctions.BS2AD(val, 'YYYY.MM.DD', 'YYYY.MM.DD');
+            if (adDot) endEngInput.value = adDot.replace(/\./g, '-');
+        } catch (e) {}
+    }
+    if (typeof endNepInput.NepaliDatePicker === 'function') {
+        endNepInput.NepaliDatePicker({
+            dateFormat: 'YYYY.MM.DD',
+            onDateSelect: updateEndEngFromNep
+        });
+    }
+    endNepInput.addEventListener('blur', updateEndEngFromNep);
+    endEngInput.addEventListener('change', function () { toDateTouched = true; });
 
     // Calculate distance (end - start)
     function recalculate() {
