@@ -1,7 +1,7 @@
 # Applies any .sql files in sql/migrations/ against the press_jemc database.
 # Safe to re-run — migrations use CREATE TABLE IF NOT EXISTS / ADD COLUMN IF NOT EXISTS.
 
-$psql = "C:/Program Files/PostgreSQL/15/bin/psql.exe"
+$psql = "C:/Program Files/PostgreSQL/17/bin/psql.exe"
 $env:PGPASSWORD = "Nepal@123"
 
 $migrationsDir = Join-Path $PSScriptRoot "migrations"
