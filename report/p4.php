@@ -80,7 +80,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'day_detail') {
         $st3->execute(); $deno_rows = $st3->fetchAll(PDO::FETCH_ASSOC);
 
         // ── D2M ──────────────────────────────────────────────────────────
-        $d2_w = ["dm.eng_date::date = :date", "dm.deleted_at IS NULL"];
+        $d2_w = ["dm.eng_date::date = :date", "dm.deleted_at IS NULL", "dm.status <> 'CANCELLED'"];
         $d2_p = [':date' => $date];
         if ($book_code) { $d2_w[] = "di.book_code = :bc"; $d2_p[':bc'] = $book_code; }
         $st4 = $conn->prepare("
@@ -170,7 +170,7 @@ if (isset($_GET['ajax']) && $_GET['ajax'] === 'month_data') {
         $dn_data = array_column($st3->fetchAll(PDO::FETCH_ASSOC),null,'day');
 
         // D2M
-        $d2_w = ["dm.eng_date::date BETWEEN :df AND :dt","dm.deleted_at IS NULL"];
+        $d2_w = ["dm.eng_date::date BETWEEN :df AND :dt","dm.deleted_at IS NULL","dm.status <> 'CANCELLED'"];
         $d2_p = [':df'=>$df,':dt'=>$dt];
         if ($book_code) { $d2_w[] = "di.book_code = :bc"; $d2_p[':bc'] = $book_code; }
         $st4 = $conn->prepare("

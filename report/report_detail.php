@@ -58,7 +58,7 @@ if ($fiscal_year) $deno_stmt->bindValue(':fy', $fiscal_year);
 $deno_stmt->execute();
 $denos = $deno_stmt->fetchAll(PDO::FETCH_ASSOC);
 
-$d2m_sql = "SELECT dm.*, di.total_qty, di.book_code FROM d2m dm JOIN d2m_items di ON di.d2m_id = dm.id WHERE di.book_code = :bc AND dm.deleted_at IS NULL ".($fiscal_year?"AND dm.fiscal_year_id = :fy":"")." ORDER BY dm.eng_date DESC";
+$d2m_sql = "SELECT dm.*, di.total_qty, di.book_code FROM d2m dm JOIN d2m_items di ON di.d2m_id = dm.id WHERE di.book_code = :bc AND dm.deleted_at IS NULL AND dm.status <> 'CANCELLED' ".($fiscal_year?"AND dm.fiscal_year_id = :fy":"")." ORDER BY dm.eng_date DESC";
 $d2m_stmt = $conn->prepare($d2m_sql);
 $d2m_stmt->bindValue(':bc', $book_code);
 if ($fiscal_year) $d2m_stmt->bindValue(':fy', $fiscal_year);

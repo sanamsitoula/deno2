@@ -137,7 +137,7 @@ if (!empty($books_list)) {
                MAX(dm.eng_date) AS d2m_last_date
         FROM d2m_items di
         JOIN d2m dm ON dm.id = di.d2m_id $d2m_st
-        WHERE di.book_code IN ($in_list) AND dm.deleted_at IS NULL
+        WHERE di.book_code IN ($in_list) AND dm.deleted_at IS NULL AND dm.status <> 'CANCELLED'
         GROUP BY di.book_code
     ")->fetchAll(PDO::FETCH_ASSOC);
     $d2m_map = array_column($d2m_rows, null, 'book_code');

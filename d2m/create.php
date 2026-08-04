@@ -71,20 +71,21 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!$fiscal_year) throw new Exception("Active fiscal year not found.");
         if (!$fiscal_code) throw new Exception("Active fiscal year code not found.");
 
-        /* 2️⃣ Check Existing D2M (same date + type) */
+        /* 2️⃣ Check Existing D2M (same date + type) — cancelled ones don't count */
         $checkStmt = $conn->prepare("
-            SELECT id, d2m_no 
+            SELECT id, d2m_no
             FROM d2m
             WHERE nep_date = :nep
               AND d2m_type = :type
               AND fiscal_year_id = :fy
+              AND status <> 'CANCELLED'
               AND deleted_at IS NULL
             LIMIT 1
         ");
         $checkStmt->execute([':nep' => $nep_date, ':type' => $type, ':fy' => $fiscal_year]);
 
         if ($checkStmt->fetch()) {
-            throw new Exception("D2M already created for this date and type.");
+            throw new Exception("D2M already created for this date and type. (Cancelled D2Ms are ignored.)");
         }
 
         /* 3️⃣ Generate Serial */

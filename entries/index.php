@@ -16,6 +16,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             JOIN d2m d ON di.d2m_id = d.id
             WHERE di.associated_deno_ids LIKE '%' || :deno_id || '%'
               AND d.deleted_at IS NULL
+              AND d.status <> 'CANCELLED'
         ");
         $checkStmt->execute([':deno_id' => $delete_id]);
         $result = $checkStmt->fetch(PDO::FETCH_ASSOC);
