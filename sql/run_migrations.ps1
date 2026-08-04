@@ -3,6 +3,7 @@
 
 $psql = "C:/Program Files/PostgreSQL/15/bin/psql.exe"
 $env:PGPASSWORD = "Nepal@123"
+$env:PGCLIENTENCODING = "UTF8"   # files are UTF-8; psql on Windows defaults to WIN1252
 
 $migrationsDir = Join-Path $PSScriptRoot "migrations"
 $files = Get-ChildItem -Path $migrationsDir -Filter "*.sql" | Sort-Object Name
