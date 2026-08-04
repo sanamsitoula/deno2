@@ -1,0 +1,872 @@
+;
+; Archive created at 2026-07-22 12:04:13
+;     dbname: press_jemc
+;     TOC Entries: 861
+;     Compression: gzip
+;     Dump Version: 1.16-0
+;     Format: CUSTOM
+;     Integer: 4 bytes
+;     Offset: 8 bytes
+;     Dumped from database version: 17.5
+;     Dumped by pg_dump version: 17.5
+;
+;
+; Selected TOC Entries:
+;
+6235; 0 0 COMMENT - SCHEMA public pg_database_owner
+1030; 1247 16452 TYPE public fiscal_year_enum postgres
+1033; 1247 16462 TYPE public received_by_enum postgres
+1024; 1247 16391 TYPE public user_enum postgres
+1042; 1247 16522 TYPE public user_role postgres
+1036; 1247 16468 TYPE public verified_by_enum postgres
+393; 1255 18983 FUNCTION public auto_set_fuel_price() postgres
+389; 1255 19418 FUNCTION public calculate_monthly_vehicle_summary(integer, character varying, character varying) postgres
+398; 1255 28383 FUNCTION public calculate_ot_hours(numeric, numeric, boolean, boolean) postgres
+397; 1255 28382 FUNCTION public calculate_working_hours(time without time zone, time without time zone, numeric) postgres
+402; 1255 28995 FUNCTION public cleanup_zkteco_logs() postgres
+370; 1255 16552 FUNCTION public enforce_single_active_fiscal_year() postgres
+405; 1255 38243 FUNCTION public fn_set_month_nep() postgres
+394; 1255 19446 FUNCTION public generate_employee_code() postgres
+388; 1255 18982 FUNCTION public get_current_fuel_price(character varying, date) postgres
+373; 1255 17588 FUNCTION public get_deno_details_for_d2m_item(integer) postgres
+392; 1255 19423 FUNCTION public get_maintenance_alerts() postgres
+391; 1255 38240 FUNCTION public get_month_nep_from_date(character varying) postgres
+371; 1255 17561 FUNCTION public get_next_d2m_serial(character varying, character, integer) postgres
+387; 1255 18981 FUNCTION public get_next_maintenance_due(integer, integer) postgres
+404; 1255 30374 PROCEDURE public import_deno_from_staging() postgres
+386; 1255 16857 FUNCTION public log_deno_changes() postgres
+403; 1255 28996 FUNCTION public log_device_capacity(integer) postgres
+372; 1255 16856 FUNCTION public log_forma_printing_changes() postgres
+400; 1255 28993 FUNCTION public log_zkteco_pull(integer, character varying, integer, integer, integer, integer, integer, integer, numeric, character varying, text) postgres
+395; 1255 19448 FUNCTION public set_active_fiscal_year() postgres
+374; 1255 28384 FUNCTION public trg_calculate_attendance_hours() postgres
+390; 1255 38241 FUNCTION public trg_set_month_nep() postgres
+406; 1255 16429 FUNCTION public update_deno_fields() postgres
+401; 1255 28994 FUNCTION public update_device_connection_status(integer, character varying) postgres
+399; 1255 28386 FUNCTION public update_monthly_summary(integer, character varying) postgres
+369; 1255 16389 FUNCTION public update_timestamp() postgres
+396; 1255 19455 FUNCTION public validate_employee_data() postgres
+301; 1259 28256 TABLE public attendance postgres
+6236; 0 0 COMMENT public TABLE attendance postgres
+6237; 0 0 COMMENT public COLUMN attendance.ot_hours postgres
+6238; 0 0 COMMENT public COLUMN attendance.ot_rate postgres
+6239; 0 0 COMMENT public COLUMN attendance.late_arrival_minutes postgres
+6240; 0 0 COMMENT public COLUMN attendance.data_source postgres
+6241; 0 0 COMMENT public COLUMN attendance.shift_type postgres
+300; 1259 28255 SEQUENCE public attendance_id_seq postgres
+6242; 0 0 SEQUENCE OWNED BY public attendance_id_seq postgres
+303; 1259 28301 TABLE public attendance_monthly_summary postgres
+6243; 0 0 COMMENT public TABLE attendance_monthly_summary postgres
+6244; 0 0 COMMENT public COLUMN attendance_monthly_summary.payable_days postgres
+302; 1259 28300 SEQUENCE public attendance_monthly_summary_id_seq postgres
+6245; 0 0 SEQUENCE OWNED BY public attendance_monthly_summary_id_seq postgres
+299; 1259 28242 TABLE public attendance_status postgres
+298; 1259 28241 SEQUENCE public attendance_status_id_seq postgres
+6246; 0 0 SEQUENCE OWNED BY public attendance_status_id_seq postgres
+238; 1259 16836 TABLE public audit_log postgres
+237; 1259 16835 SEQUENCE public audit_log_id_seq postgres
+6247; 0 0 SEQUENCE OWNED BY public audit_log_id_seq postgres
+240; 1259 16873 TABLE public book_packing postgres
+6248; 0 0 COMMENT public TABLE book_packing postgres
+6249; 0 0 COMMENT public COLUMN book_packing.name postgres
+6250; 0 0 COMMENT public COLUMN book_packing.jt_print_qty postgres
+6251; 0 0 COMMENT public COLUMN book_packing.p_qty postgres
+6252; 0 0 COMMENT public COLUMN book_packing.status postgres
+6253; 0 0 COMMENT public COLUMN book_packing.packing_status postgres
+239; 1259 16872 SEQUENCE public book_packing_id_seq postgres
+6254; 0 0 SEQUENCE OWNED BY public book_packing_id_seq postgres
+218; 1259 16396 TABLE public books postgres
+217; 1259 16395 SEQUENCE public books_book_id_seq postgres
+6255; 0 0 SEQUENCE OWNED BY public books_book_id_seq postgres
+333; 1259 29697 TABLE public ctp_export_jobs postgres
+332; 1259 29696 SEQUENCE public ctp_export_jobs_id_seq postgres
+6256; 0 0 SEQUENCE OWNED BY public ctp_export_jobs_id_seq postgres
+258; 1259 17516 TABLE public d2m postgres
+6257; 0 0 COMMENT public COLUMN d2m.total_quantity postgres
+6258; 0 0 COMMENT public COLUMN d2m.total_books postgres
+257; 1259 17515 SEQUENCE public d2m_id_seq postgres
+6259; 0 0 SEQUENCE OWNED BY public d2m_id_seq postgres
+260; 1259 17573 TABLE public d2m_items postgres
+6260; 0 0 COMMENT public COLUMN d2m_items.associated_deno_ids postgres
+6261; 0 0 COMMENT public COLUMN d2m_items.deno_serial_number postgres
+259; 1259 17572 SEQUENCE public d2m_items_id_seq postgres
+6262; 0 0 SEQUENCE OWNED BY public d2m_items_id_seq postgres
+220; 1259 16491 TABLE public deno postgres
+6263; 0 0 COMMENT public COLUMN deno.jt_id postgres
+6264; 0 0 COMMENT public COLUMN deno.bp_id postgres
+6265; 0 0 COMMENT public COLUMN deno.d2m_id postgres
+6266; 0 0 COMMENT public COLUMN deno.entry_type postgres
+6267; 0 0 COMMENT public COLUMN deno.sender_by postgres
+219; 1259 16490 SEQUENCE public deno_id_seq postgres
+6268; 0 0 SEQUENCE OWNED BY public deno_id_seq postgres
+352; 1259 30369 TABLE public deno_staging postgres
+351; 1259 30341 TABLE public deno_test postgres
+6269; 0 0 COMMENT public COLUMN deno_test.jt_id postgres
+6270; 0 0 COMMENT public COLUMN deno_test.bp_id postgres
+6271; 0 0 COMMENT public COLUMN deno_test.d2m_id postgres
+6272; 0 0 COMMENT public COLUMN deno_test.entry_type postgres
+6273; 0 0 COMMENT public COLUMN deno_test.sender_by postgres
+242; 1259 16927 TABLE public department postgres
+241; 1259 16926 SEQUENCE public department_id_seq postgres
+6274; 0 0 SEQUENCE OWNED BY public department_id_seq postgres
+246; 1259 16948 TABLE public designation postgres
+245; 1259 16947 SEQUENCE public designation_id_seq postgres
+6275; 0 0 SEQUENCE OWNED BY public designation_id_seq postgres
+265; 1259 18621 TABLE public drivers postgres
+264; 1259 18620 SEQUENCE public drivers_driver_id_seq postgres
+6276; 0 0 SEQUENCE OWNED BY public drivers_driver_id_seq postgres
+252; 1259 17001 TABLE public education_details postgres
+251; 1259 17000 SEQUENCE public education_details_id_seq postgres
+6277; 0 0 SEQUENCE OWNED BY public education_details_id_seq postgres
+248; 1259 16957 TABLE public employee postgres
+254; 1259 17019 TABLE public employee_designation postgres
+253; 1259 17018 SEQUENCE public employee_designation_id_seq postgres
+6278; 0 0 SEQUENCE OWNED BY public employee_designation_id_seq postgres
+256; 1259 17060 TABLE public employee_documents postgres
+255; 1259 17059 SEQUENCE public employee_documents_id_seq postgres
+6279; 0 0 SEQUENCE OWNED BY public employee_documents_id_seq postgres
+250; 1259 16986 TABLE public employee_family postgres
+249; 1259 16985 SEQUENCE public employee_family_id_seq postgres
+6280; 0 0 SEQUENCE OWNED BY public employee_family_id_seq postgres
+247; 1259 16956 SEQUENCE public employee_id_seq postgres
+6281; 0 0 SEQUENCE OWNED BY public employee_id_seq postgres
+338; 1259 29767 TABLE public fctp_books postgres
+337; 1259 29766 SEQUENCE public fctp_books_id_seq postgres
+6282; 0 0 SEQUENCE OWNED BY public fctp_books_id_seq postgres
+342; 1259 29808 TABLE public fctp_formas postgres
+341; 1259 29807 SEQUENCE public fctp_formas_id_seq postgres
+6283; 0 0 SEQUENCE OWNED BY public fctp_formas_id_seq postgres
+344; 1259 29853 TABLE public fctp_imposition_templates postgres
+343; 1259 29852 SEQUENCE public fctp_imposition_templates_id_seq postgres
+6284; 0 0 SEQUENCE OWNED BY public fctp_imposition_templates_id_seq postgres
+340; 1259 29783 TABLE public fctp_job_tickets postgres
+339; 1259 29782 SEQUENCE public fctp_job_tickets_id_seq postgres
+6285; 0 0 SEQUENCE OWNED BY public fctp_job_tickets_id_seq postgres
+346; 1259 29880 TABLE public fctp_uploads postgres
+345; 1259 29879 SEQUENCE public fctp_uploads_id_seq postgres
+6286; 0 0 SEQUENCE OWNED BY public fctp_uploads_id_seq postgres
+224; 1259 16542 TABLE public fiscal_years postgres
+223; 1259 16541 SEQUENCE public fiscal_years_id_seq postgres
+6287; 0 0 SEQUENCE OWNED BY public fiscal_years_id_seq postgres
+232; 1259 16655 TABLE public forma postgres
+231; 1259 16654 SEQUENCE public forma_id_seq postgres
+6288; 0 0 SEQUENCE OWNED BY public forma_id_seq postgres
+236; 1259 16764 TABLE public forma_printing postgres
+235; 1259 16763 SEQUENCE public forma_printing_id_seq postgres
+6289; 0 0 SEQUENCE OWNED BY public forma_printing_id_seq postgres
+271; 1259 18714 TABLE public fuel_coupon_distributions postgres
+270; 1259 18713 SEQUENCE public fuel_coupon_distributions_distribution_id_seq postgres
+6290; 0 0 SEQUENCE OWNED BY public fuel_coupon_distributions_distribution_id_seq postgres
+269; 1259 18679 TABLE public fuel_coupons postgres
+268; 1259 18678 SEQUENCE public fuel_coupons_coupon_id_seq postgres
+6291; 0 0 SEQUENCE OWNED BY public fuel_coupons_coupon_id_seq postgres
+291; 1259 19043 TABLE public fuel_price_history postgres
+290; 1259 19042 SEQUENCE public fuel_price_history_price_id_seq postgres
+6292; 0 0 SEQUENCE OWNED BY public fuel_price_history_price_id_seq postgres
+295; 1259 28204 TABLE public holiday_types postgres
+294; 1259 28203 SEQUENCE public holiday_types_id_seq postgres
+6293; 0 0 SEQUENCE OWNED BY public holiday_types_id_seq postgres
+297; 1259 28219 TABLE public holidays postgres
+6294; 0 0 COMMENT public TABLE holidays postgres
+296; 1259 28218 SEQUENCE public holidays_id_seq postgres
+6295; 0 0 SEQUENCE OWNED BY public holidays_id_seq postgres
+331; 1259 29677 TABLE public imposition_templates postgres
+330; 1259 29676 SEQUENCE public imposition_templates_id_seq postgres
+6296; 0 0 SEQUENCE OWNED BY public imposition_templates_id_seq postgres
+226; 1259 16587 TABLE public job_ticket postgres
+228; 1259 16615 TABLE public job_ticket_details postgres
+227; 1259 16614 SEQUENCE public job_ticket_details_id_seq postgres
+6297; 0 0 SEQUENCE OWNED BY public job_ticket_details_id_seq postgres
+225; 1259 16586 SEQUENCE public job_ticket_id_seq postgres
+6298; 0 0 SEQUENCE OWNED BY public job_ticket_id_seq postgres
+307; 1259 28347 TABLE public leave_balance postgres
+6299; 0 0 COMMENT public TABLE leave_balance postgres
+306; 1259 28346 SEQUENCE public leave_balance_id_seq postgres
+6300; 0 0 SEQUENCE OWNED BY public leave_balance_id_seq postgres
+244; 1259 16939 TABLE public level postgres
+243; 1259 16938 SEQUENCE public level_id_seq postgres
+6301; 0 0 SEQUENCE OWNED BY public level_id_seq postgres
+230; 1259 16636 TABLE public machines postgres
+229; 1259 16635 SEQUENCE public machines_id_seq postgres
+6302; 0 0 SEQUENCE OWNED BY public machines_id_seq postgres
+287; 1259 18940 TABLE public maintenance_parts postgres
+286; 1259 18939 SEQUENCE public maintenance_parts_part_id_seq postgres
+6303; 0 0 SEQUENCE OWNED BY public maintenance_parts_part_id_seq postgres
+283; 1259 18870 TABLE public maintenance_types postgres
+282; 1259 18869 SEQUENCE public maintenance_types_maintenance_type_id_seq postgres
+6304; 0 0 SEQUENCE OWNED BY public maintenance_types_maintenance_type_id_seq postgres
+275; 1259 18780 TABLE public monthly_vehicle_summary postgres
+274; 1259 18779 SEQUENCE public monthly_vehicle_summary_summary_id_seq postgres
+6305; 0 0 SEQUENCE OWNED BY public monthly_vehicle_summary_summary_id_seq postgres
+305; 1259 28334 TABLE public ot_rules postgres
+6306; 0 0 COMMENT public TABLE ot_rules postgres
+304; 1259 28333 SEQUENCE public ot_rules_id_seq postgres
+6307; 0 0 SEQUENCE OWNED BY public ot_rules_id_seq postgres
+335; 1259 29742 TABLE public page_setups postgres
+334; 1259 29741 SEQUENCE public page_setups_id_seq postgres
+6308; 0 0 SEQUENCE OWNED BY public page_setups_id_seq postgres
+366; 1259 35323 TABLE public recon_brt postgres
+365; 1259 35322 SEQUENCE public recon_brt_id_seq postgres
+6309; 0 0 SEQUENCE OWNED BY public recon_brt_id_seq postgres
+360; 1259 35277 TABLE public recon_comparative postgres
+359; 1259 35276 SEQUENCE public recon_comparative_id_seq postgres
+6310; 0 0 SEQUENCE OWNED BY public recon_comparative_id_seq postgres
+354; 1259 35232 TABLE public recon_marketing postgres
+353; 1259 35231 SEQUENCE public recon_marketing_id_seq postgres
+6311; 0 0 SEQUENCE OWNED BY public recon_marketing_id_seq postgres
+362; 1259 35292 TABLE public recon_modules postgres
+361; 1259 35291 SEQUENCE public recon_modules_id_seq postgres
+6312; 0 0 SEQUENCE OWNED BY public recon_modules_id_seq postgres
+364; 1259 35308 TABLE public recon_opening_stock_2080 postgres
+363; 1259 35307 SEQUENCE public recon_opening_stock_2080_id_seq postgres
+6313; 0 0 SEQUENCE OWNED BY public recon_opening_stock_2080_id_seq postgres
+368; 1259 35338 TABLE public recon_pkr postgres
+367; 1259 35337 SEQUENCE public recon_pkr_id_seq postgres
+6314; 0 0 SEQUENCE OWNED BY public recon_pkr_id_seq postgres
+358; 1259 35262 TABLE public recon_software postgres
+357; 1259 35261 SEQUENCE public recon_software_id_seq postgres
+6315; 0 0 SEQUENCE OWNED BY public recon_software_id_seq postgres
+356; 1259 35247 TABLE public recon_stockkeeper postgres
+355; 1259 35246 SEQUENCE public recon_stockkeeper_id_seq postgres
+6316; 0 0 SEQUENCE OWNED BY public recon_stockkeeper_id_seq postgres
+234; 1259 16754 TABLE public shifts postgres
+233; 1259 16753 SEQUENCE public shifts_id_seq postgres
+6317; 0 0 SEQUENCE OWNED BY public shifts_id_seq postgres
+326; 1259 28965 TABLE public system_settings postgres
+325; 1259 28964 SEQUENCE public system_settings_id_seq postgres
+6318; 0 0 SEQUENCE OWNED BY public system_settings_id_seq postgres
+222; 1259 16530 TABLE public users postgres
+221; 1259 16529 SEQUENCE public users_id_seq postgres
+6319; 0 0 SEQUENCE OWNED BY public users_id_seq postgres
+336; 1259 29759 VIEW public v_ctp_job_summary postgres
+261; 1259 17589 VIEW public v_d2m_items_with_deno_count postgres
+6320; 0 0 COMMENT public VIEW v_d2m_items_with_deno_count postgres
+308; 1259 28367 VIEW public v_daily_attendance_report postgres
+350; 1259 30183 VIEW public v_dashboard_class_distribution postgres
+349; 1259 30178 VIEW public v_dashboard_subject_production postgres
+310; 1259 28377 VIEW public v_employee_attendance_stats postgres
+312; 1259 28770 TABLE public zkteco_devices postgres
+6321; 0 0 COMMENT public TABLE zkteco_devices postgres
+6322; 0 0 COMMENT public COLUMN zkteco_devices.disable_during_pull postgres
+6323; 0 0 COMMENT public COLUMN zkteco_devices.auto_clear_records postgres
+314; 1259 28801 TABLE public zkteco_user_mapping postgres
+6324; 0 0 COMMENT public TABLE zkteco_user_mapping postgres
+329; 1259 28988 VIEW public v_employee_device_mapping postgres
+293; 1259 19450 VIEW public v_employees_active postgres
+347; 1259 29899 VIEW public v_fctp_forma_summary postgres
+348; 1259 29904 VIEW public v_fctp_job_summary postgres
+263; 1259 18593 TABLE public vehicles postgres
+279; 1259 18827 VIEW public v_fuel_coupon_full_details postgres
+292; 1259 19068 VIEW public v_fuel_price_current postgres
+309; 1259 28372 VIEW public v_monthly_attendance_summary postgres
+281; 1259 18837 VIEW public v_monthly_summary_full_details postgres
+267; 1259 18644 TABLE public vehicle_driver_assignments postgres
+278; 1259 18822 VIEW public v_vehicle_full_details postgres
+273; 1259 18744 TABLE public vehicle_daily_logs postgres
+280; 1259 18832 VIEW public v_vehicle_logs_full_details postgres
+285; 1259 18896 TABLE public vehicle_maintenance_records postgres
+288; 1259 18967 VIEW public v_vehicle_maintenance_full_details postgres
+289; 1259 18972 VIEW public v_vehicle_maintenance_summary postgres
+316; 1259 28839 TABLE public zkteco_pull_log postgres
+6325; 0 0 COMMENT public TABLE zkteco_pull_log postgres
+327; 1259 28978 VIEW public v_zkteco_device_status postgres
+328; 1259 28983 VIEW public v_zkteco_pull_statistics postgres
+277; 1259 18811 TABLE public vehicle_audit_logs postgres
+276; 1259 18810 SEQUENCE public vehicle_audit_logs_audit_id_seq postgres
+6326; 0 0 SEQUENCE OWNED BY public vehicle_audit_logs_audit_id_seq postgres
+272; 1259 18743 SEQUENCE public vehicle_daily_logs_log_id_seq postgres
+6327; 0 0 SEQUENCE OWNED BY public vehicle_daily_logs_log_id_seq postgres
+266; 1259 18643 SEQUENCE public vehicle_driver_assignments_assignment_id_seq postgres
+6328; 0 0 SEQUENCE OWNED BY public vehicle_driver_assignments_assignment_id_seq postgres
+284; 1259 18895 SEQUENCE public vehicle_maintenance_records_maintenance_id_seq postgres
+6329; 0 0 SEQUENCE OWNED BY public vehicle_maintenance_records_maintenance_id_seq postgres
+262; 1259 18592 SEQUENCE public vehicles_vehicle_id_seq postgres
+6330; 0 0 SEQUENCE OWNED BY public vehicles_vehicle_id_seq postgres
+320; 1259 28895 TABLE public zkteco_capacity_log postgres
+6331; 0 0 COMMENT public TABLE zkteco_capacity_log postgres
+319; 1259 28894 SEQUENCE public zkteco_capacity_log_id_seq postgres
+6332; 0 0 SEQUENCE OWNED BY public zkteco_capacity_log_id_seq postgres
+311; 1259 28769 SEQUENCE public zkteco_devices_id_seq postgres
+6333; 0 0 SEQUENCE OWNED BY public zkteco_devices_id_seq postgres
+315; 1259 28838 SEQUENCE public zkteco_pull_log_id_seq postgres
+6334; 0 0 SEQUENCE OWNED BY public zkteco_pull_log_id_seq postgres
+322; 1259 28916 TABLE public zkteco_raw_attendance postgres
+6335; 0 0 COMMENT public TABLE zkteco_raw_attendance postgres
+321; 1259 28915 SEQUENCE public zkteco_raw_attendance_id_seq postgres
+6336; 0 0 SEQUENCE OWNED BY public zkteco_raw_attendance_id_seq postgres
+324; 1259 28951 TABLE public zkteco_settings postgres
+6337; 0 0 COMMENT public TABLE zkteco_settings postgres
+323; 1259 28950 SEQUENCE public zkteco_settings_id_seq postgres
+6338; 0 0 SEQUENCE OWNED BY public zkteco_settings_id_seq postgres
+318; 1259 28865 TABLE public zkteco_sync_queue postgres
+6339; 0 0 COMMENT public TABLE zkteco_sync_queue postgres
+317; 1259 28864 SEQUENCE public zkteco_sync_queue_id_seq postgres
+6340; 0 0 SEQUENCE OWNED BY public zkteco_sync_queue_id_seq postgres
+313; 1259 28800 SEQUENCE public zkteco_user_mapping_id_seq postgres
+6341; 0 0 SEQUENCE OWNED BY public zkteco_user_mapping_id_seq postgres
+5189; 2604 28259 DEFAULT public attendance id postgres
+5204; 2604 28304 DEFAULT public attendance_monthly_summary id postgres
+5185; 2604 28245 DEFAULT public attendance_status id postgres
+5077; 2604 16839 DEFAULT public audit_log id postgres
+5079; 2604 16876 DEFAULT public book_packing id postgres
+5040; 2604 16399 DEFAULT public books book_id postgres
+5298; 2604 29700 DEFAULT public ctp_export_jobs id postgres
+5114; 2604 17519 DEFAULT public d2m id postgres
+5119; 2604 17576 DEFAULT public d2m_items id postgres
+5048; 2604 16494 DEFAULT public deno id postgres
+5083; 2604 16930 DEFAULT public department id postgres
+5090; 2604 16951 DEFAULT public designation id postgres
+5126; 2604 18624 DEFAULT public drivers driver_id postgres
+5101; 2604 17004 DEFAULT public education_details id postgres
+5093; 2604 16960 DEFAULT public employee id postgres
+5105; 2604 17022 DEFAULT public employee_designation id postgres
+5110; 2604 17063 DEFAULT public employee_documents id postgres
+5099; 2604 16989 DEFAULT public employee_family id postgres
+5327; 2604 29770 DEFAULT public fctp_books id postgres
+5339; 2604 29811 DEFAULT public fctp_formas id postgres
+5366; 2604 29856 DEFAULT public fctp_imposition_templates id postgres
+5332; 2604 29786 DEFAULT public fctp_job_tickets id postgres
+5385; 2604 29883 DEFAULT public fctp_uploads id postgres
+5058; 2604 16545 DEFAULT public fiscal_years id postgres
+5071; 2604 16658 DEFAULT public forma id postgres
+5074; 2604 16767 DEFAULT public forma_printing id postgres
+5140; 2604 18717 DEFAULT public fuel_coupon_distributions distribution_id postgres
+5134; 2604 18682 DEFAULT public fuel_coupons coupon_id postgres
+5173; 2604 19046 DEFAULT public fuel_price_history price_id postgres
+5176; 2604 28207 DEFAULT public holiday_types id postgres
+5181; 2604 28222 DEFAULT public holidays id postgres
+5286; 2604 29680 DEFAULT public imposition_templates id postgres
+5061; 2604 16590 DEFAULT public job_ticket id postgres
+5066; 2604 16618 DEFAULT public job_ticket_details id postgres
+5228; 2604 28350 DEFAULT public leave_balance id postgres
+5087; 2604 16942 DEFAULT public level id postgres
+5069; 2604 16639 DEFAULT public machines id postgres
+5169; 2604 18943 DEFAULT public maintenance_parts part_id postgres
+5154; 2604 18873 DEFAULT public maintenance_types maintenance_type_id postgres
+5149; 2604 18783 DEFAULT public monthly_vehicle_summary summary_id postgres
+5221; 2604 28337 DEFAULT public ot_rules id postgres
+5317; 2604 29745 DEFAULT public page_setups id postgres
+5428; 2604 35326 DEFAULT public recon_brt id postgres
+5412; 2604 35280 DEFAULT public recon_comparative id postgres
+5397; 2604 35235 DEFAULT public recon_marketing id postgres
+5417; 2604 35295 DEFAULT public recon_modules id postgres
+5423; 2604 35311 DEFAULT public recon_opening_stock_2080 id postgres
+5433; 2604 35341 DEFAULT public recon_pkr id postgres
+5407; 2604 35265 DEFAULT public recon_software id postgres
+5402; 2604 35250 DEFAULT public recon_stockkeeper id postgres
+5072; 2604 16757 DEFAULT public shifts id postgres
+5283; 2604 28968 DEFAULT public system_settings id postgres
+5055; 2604 16533 DEFAULT public users id postgres
+5152; 2604 18814 DEFAULT public vehicle_audit_logs audit_id postgres
+5145; 2604 18747 DEFAULT public vehicle_daily_logs log_id postgres
+5130; 2604 18647 DEFAULT public vehicle_driver_assignments assignment_id postgres
+5159; 2604 18899 DEFAULT public vehicle_maintenance_records maintenance_id postgres
+5122; 2604 18596 DEFAULT public vehicles vehicle_id postgres
+5271; 2604 28898 DEFAULT public zkteco_capacity_log id postgres
+5234; 2604 28773 DEFAULT public zkteco_devices id postgres
+5257; 2604 28842 DEFAULT public zkteco_pull_log id postgres
+5277; 2604 28919 DEFAULT public zkteco_raw_attendance id postgres
+5280; 2604 28954 DEFAULT public zkteco_settings id postgres
+5265; 2604 28868 DEFAULT public zkteco_sync_queue id postgres
+5249; 2604 28804 DEFAULT public zkteco_user_mapping id postgres
+6172; 0 28256 TABLE DATA public attendance postgres
+6174; 0 28301 TABLE DATA public attendance_monthly_summary postgres
+6170; 0 28242 TABLE DATA public attendance_status postgres
+6118; 0 16836 TABLE DATA public audit_log postgres
+6120; 0 16873 TABLE DATA public book_packing postgres
+6098; 0 16396 TABLE DATA public books postgres
+6198; 0 29697 TABLE DATA public ctp_export_jobs postgres
+6138; 0 17516 TABLE DATA public d2m postgres
+6140; 0 17573 TABLE DATA public d2m_items postgres
+6100; 0 16491 TABLE DATA public deno postgres
+6212; 0 30369 TABLE DATA public deno_staging postgres
+6211; 0 30341 TABLE DATA public deno_test postgres
+6122; 0 16927 TABLE DATA public department postgres
+6126; 0 16948 TABLE DATA public designation postgres
+6144; 0 18621 TABLE DATA public drivers postgres
+6132; 0 17001 TABLE DATA public education_details postgres
+6128; 0 16957 TABLE DATA public employee postgres
+6134; 0 17019 TABLE DATA public employee_designation postgres
+6136; 0 17060 TABLE DATA public employee_documents postgres
+6130; 0 16986 TABLE DATA public employee_family postgres
+6202; 0 29767 TABLE DATA public fctp_books postgres
+6206; 0 29808 TABLE DATA public fctp_formas postgres
+6208; 0 29853 TABLE DATA public fctp_imposition_templates postgres
+6204; 0 29783 TABLE DATA public fctp_job_tickets postgres
+6210; 0 29880 TABLE DATA public fctp_uploads postgres
+6104; 0 16542 TABLE DATA public fiscal_years postgres
+6112; 0 16655 TABLE DATA public forma postgres
+6116; 0 16764 TABLE DATA public forma_printing postgres
+6150; 0 18714 TABLE DATA public fuel_coupon_distributions postgres
+6148; 0 18679 TABLE DATA public fuel_coupons postgres
+6164; 0 19043 TABLE DATA public fuel_price_history postgres
+6166; 0 28204 TABLE DATA public holiday_types postgres
+6168; 0 28219 TABLE DATA public holidays postgres
+6196; 0 29677 TABLE DATA public imposition_templates postgres
+6106; 0 16587 TABLE DATA public job_ticket postgres
+6108; 0 16615 TABLE DATA public job_ticket_details postgres
+6178; 0 28347 TABLE DATA public leave_balance postgres
+6124; 0 16939 TABLE DATA public level postgres
+6110; 0 16636 TABLE DATA public machines postgres
+6162; 0 18940 TABLE DATA public maintenance_parts postgres
+6158; 0 18870 TABLE DATA public maintenance_types postgres
+6154; 0 18780 TABLE DATA public monthly_vehicle_summary postgres
+6176; 0 28334 TABLE DATA public ot_rules postgres
+6200; 0 29742 TABLE DATA public page_setups postgres
+6226; 0 35323 TABLE DATA public recon_brt postgres
+6220; 0 35277 TABLE DATA public recon_comparative postgres
+6214; 0 35232 TABLE DATA public recon_marketing postgres
+6222; 0 35292 TABLE DATA public recon_modules postgres
+6224; 0 35308 TABLE DATA public recon_opening_stock_2080 postgres
+6228; 0 35338 TABLE DATA public recon_pkr postgres
+6218; 0 35262 TABLE DATA public recon_software postgres
+6216; 0 35247 TABLE DATA public recon_stockkeeper postgres
+6114; 0 16754 TABLE DATA public shifts postgres
+6194; 0 28965 TABLE DATA public system_settings postgres
+6102; 0 16530 TABLE DATA public users postgres
+6156; 0 18811 TABLE DATA public vehicle_audit_logs postgres
+6152; 0 18744 TABLE DATA public vehicle_daily_logs postgres
+6146; 0 18644 TABLE DATA public vehicle_driver_assignments postgres
+6160; 0 18896 TABLE DATA public vehicle_maintenance_records postgres
+6142; 0 18593 TABLE DATA public vehicles postgres
+6188; 0 28895 TABLE DATA public zkteco_capacity_log postgres
+6180; 0 28770 TABLE DATA public zkteco_devices postgres
+6184; 0 28839 TABLE DATA public zkteco_pull_log postgres
+6190; 0 28916 TABLE DATA public zkteco_raw_attendance postgres
+6192; 0 28951 TABLE DATA public zkteco_settings postgres
+6186; 0 28865 TABLE DATA public zkteco_sync_queue postgres
+6182; 0 28801 TABLE DATA public zkteco_user_mapping postgres
+6342; 0 0 SEQUENCE SET public attendance_id_seq postgres
+6343; 0 0 SEQUENCE SET public attendance_monthly_summary_id_seq postgres
+6344; 0 0 SEQUENCE SET public attendance_status_id_seq postgres
+6345; 0 0 SEQUENCE SET public audit_log_id_seq postgres
+6346; 0 0 SEQUENCE SET public book_packing_id_seq postgres
+6347; 0 0 SEQUENCE SET public books_book_id_seq postgres
+6348; 0 0 SEQUENCE SET public ctp_export_jobs_id_seq postgres
+6349; 0 0 SEQUENCE SET public d2m_id_seq postgres
+6350; 0 0 SEQUENCE SET public d2m_items_id_seq postgres
+6351; 0 0 SEQUENCE SET public deno_id_seq postgres
+6352; 0 0 SEQUENCE SET public department_id_seq postgres
+6353; 0 0 SEQUENCE SET public designation_id_seq postgres
+6354; 0 0 SEQUENCE SET public drivers_driver_id_seq postgres
+6355; 0 0 SEQUENCE SET public education_details_id_seq postgres
+6356; 0 0 SEQUENCE SET public employee_designation_id_seq postgres
+6357; 0 0 SEQUENCE SET public employee_documents_id_seq postgres
+6358; 0 0 SEQUENCE SET public employee_family_id_seq postgres
+6359; 0 0 SEQUENCE SET public employee_id_seq postgres
+6360; 0 0 SEQUENCE SET public fctp_books_id_seq postgres
+6361; 0 0 SEQUENCE SET public fctp_formas_id_seq postgres
+6362; 0 0 SEQUENCE SET public fctp_imposition_templates_id_seq postgres
+6363; 0 0 SEQUENCE SET public fctp_job_tickets_id_seq postgres
+6364; 0 0 SEQUENCE SET public fctp_uploads_id_seq postgres
+6365; 0 0 SEQUENCE SET public fiscal_years_id_seq postgres
+6366; 0 0 SEQUENCE SET public forma_id_seq postgres
+6367; 0 0 SEQUENCE SET public forma_printing_id_seq postgres
+6368; 0 0 SEQUENCE SET public fuel_coupon_distributions_distribution_id_seq postgres
+6369; 0 0 SEQUENCE SET public fuel_coupons_coupon_id_seq postgres
+6370; 0 0 SEQUENCE SET public fuel_price_history_price_id_seq postgres
+6371; 0 0 SEQUENCE SET public holiday_types_id_seq postgres
+6372; 0 0 SEQUENCE SET public holidays_id_seq postgres
+6373; 0 0 SEQUENCE SET public imposition_templates_id_seq postgres
+6374; 0 0 SEQUENCE SET public job_ticket_details_id_seq postgres
+6375; 0 0 SEQUENCE SET public job_ticket_id_seq postgres
+6376; 0 0 SEQUENCE SET public leave_balance_id_seq postgres
+6377; 0 0 SEQUENCE SET public level_id_seq postgres
+6378; 0 0 SEQUENCE SET public machines_id_seq postgres
+6379; 0 0 SEQUENCE SET public maintenance_parts_part_id_seq postgres
+6380; 0 0 SEQUENCE SET public maintenance_types_maintenance_type_id_seq postgres
+6381; 0 0 SEQUENCE SET public monthly_vehicle_summary_summary_id_seq postgres
+6382; 0 0 SEQUENCE SET public ot_rules_id_seq postgres
+6383; 0 0 SEQUENCE SET public page_setups_id_seq postgres
+6384; 0 0 SEQUENCE SET public recon_brt_id_seq postgres
+6385; 0 0 SEQUENCE SET public recon_comparative_id_seq postgres
+6386; 0 0 SEQUENCE SET public recon_marketing_id_seq postgres
+6387; 0 0 SEQUENCE SET public recon_modules_id_seq postgres
+6388; 0 0 SEQUENCE SET public recon_opening_stock_2080_id_seq postgres
+6389; 0 0 SEQUENCE SET public recon_pkr_id_seq postgres
+6390; 0 0 SEQUENCE SET public recon_software_id_seq postgres
+6391; 0 0 SEQUENCE SET public recon_stockkeeper_id_seq postgres
+6392; 0 0 SEQUENCE SET public shifts_id_seq postgres
+6393; 0 0 SEQUENCE SET public system_settings_id_seq postgres
+6394; 0 0 SEQUENCE SET public users_id_seq postgres
+6395; 0 0 SEQUENCE SET public vehicle_audit_logs_audit_id_seq postgres
+6396; 0 0 SEQUENCE SET public vehicle_daily_logs_log_id_seq postgres
+6397; 0 0 SEQUENCE SET public vehicle_driver_assignments_assignment_id_seq postgres
+6398; 0 0 SEQUENCE SET public vehicle_maintenance_records_maintenance_id_seq postgres
+6399; 0 0 SEQUENCE SET public vehicles_vehicle_id_seq postgres
+6400; 0 0 SEQUENCE SET public zkteco_capacity_log_id_seq postgres
+6401; 0 0 SEQUENCE SET public zkteco_devices_id_seq postgres
+6402; 0 0 SEQUENCE SET public zkteco_pull_log_id_seq postgres
+6403; 0 0 SEQUENCE SET public zkteco_raw_attendance_id_seq postgres
+6404; 0 0 SEQUENCE SET public zkteco_settings_id_seq postgres
+6405; 0 0 SEQUENCE SET public zkteco_sync_queue_id_seq postgres
+6406; 0 0 SEQUENCE SET public zkteco_user_mapping_id_seq postgres
+5669; 2606 28322 CONSTRAINT public attendance_monthly_summary attendance_monthly_summary_pkey postgres
+5657; 2606 28276 CONSTRAINT public attendance attendance_pkey postgres
+5653; 2606 28252 CONSTRAINT public attendance_status attendance_status_pkey postgres
+5511; 2606 16844 CONSTRAINT public audit_log audit_log_pkey postgres
+5518; 2606 16883 CONSTRAINT public book_packing book_packing_pkey postgres
+5466; 2606 16489 CONSTRAINT public books books_book_code_key postgres
+5468; 2606 16407 CONSTRAINT public books books_pkey postgres
+5734; 2606 29722 CONSTRAINT public ctp_export_jobs ctp_export_jobs_pkey postgres
+5566; 2606 17529 CONSTRAINT public d2m d2m_d2m_no_key postgres
+5579; 2606 17579 CONSTRAINT public d2m_items d2m_items_pkey postgres
+5568; 2606 17527 CONSTRAINT public d2m d2m_pkey postgres
+5470; 2606 16504 CONSTRAINT public deno deno_pkey postgres
+5773; 2606 30357 CONSTRAINT public deno_test deno_test_pkey postgres
+5527; 2606 16937 CONSTRAINT public department department_pkey postgres
+5531; 2606 16955 CONSTRAINT public designation designation_pkey postgres
+5588; 2606 18631 CONSTRAINT public drivers drivers_pkey postgres
+5557; 2606 17011 CONSTRAINT public education_details education_details_pkey postgres
+5533; 2606 16969 CONSTRAINT public employee employee_code_key postgres
+5560; 2606 17030 CONSTRAINT public employee_designation employee_designation_pkey postgres
+5564; 2606 17070 CONSTRAINT public employee_documents employee_documents_pkey postgres
+5554; 2606 16994 CONSTRAINT public employee_family employee_family_pkey postgres
+5535; 2606 16967 CONSTRAINT public employee employee_pkey postgres
+5741; 2606 29780 CONSTRAINT public fctp_books fctp_books_book_code_key postgres
+5743; 2606 29778 CONSTRAINT public fctp_books fctp_books_pkey postgres
+5753; 2606 29841 CONSTRAINT public fctp_formas fctp_formas_pkey postgres
+5760; 2606 29878 CONSTRAINT public fctp_imposition_templates fctp_imposition_templates_pkey postgres
+5746; 2606 29798 CONSTRAINT public fctp_job_tickets fctp_job_tickets_job_ticket_code_key postgres
+5748; 2606 29796 CONSTRAINT public fctp_job_tickets fctp_job_tickets_pkey postgres
+5762; 2606 29891 CONSTRAINT public fctp_uploads fctp_uploads_pkey postgres
+5487; 2606 16551 CONSTRAINT public fiscal_years fiscal_years_fiscal_code_key postgres
+5489; 2606 16549 CONSTRAINT public fiscal_years fiscal_years_pkey postgres
+5499; 2606 16662 CONSTRAINT public forma forma_pkey postgres
+5503; 2606 16773 CONSTRAINT public forma_printing forma_printing_pkey postgres
+5601; 2606 18725 CONSTRAINT public fuel_coupon_distributions fuel_coupon_distributions_pkey postgres
+5596; 2606 18692 CONSTRAINT public fuel_coupons fuel_coupons_pkey postgres
+5637; 2606 19053 CONSTRAINT public fuel_price_history fuel_price_history_pkey postgres
+5641; 2606 28215 CONSTRAINT public holiday_types holiday_types_pkey postgres
+5645; 2606 28229 CONSTRAINT public holidays holidays_pkey postgres
+5732; 2606 29695 CONSTRAINT public imposition_templates imposition_templates_pkey postgres
+5493; 2606 16624 CONSTRAINT public job_ticket_details job_ticket_details_pkey postgres
+5491; 2606 16598 CONSTRAINT public job_ticket job_ticket_pkey postgres
+5680; 2606 28357 CONSTRAINT public leave_balance leave_balance_pkey postgres
+5529; 2606 16946 CONSTRAINT public level level_pkey postgres
+5495; 2606 16644 CONSTRAINT public machines machines_machine_name_key postgres
+5497; 2606 16642 CONSTRAINT public machines machines_pkey postgres
+5635; 2606 18950 CONSTRAINT public maintenance_parts maintenance_parts_pkey postgres
+5623; 2606 18881 CONSTRAINT public maintenance_types maintenance_types_pkey postgres
+5625; 2606 18883 CONSTRAINT public maintenance_types maintenance_types_type_code_key postgres
+5614; 2606 18789 CONSTRAINT public monthly_vehicle_summary monthly_vehicle_summary_pkey postgres
+5676; 2606 28345 CONSTRAINT public ot_rules ot_rules_pkey postgres
+5739; 2606 29758 CONSTRAINT public page_setups page_setups_pkey postgres
+5805; 2606 35336 CONSTRAINT public recon_brt recon_brt_book_code_fiscal_code_key postgres
+5807; 2606 35334 CONSTRAINT public recon_brt recon_brt_pkey postgres
+5791; 2606 35290 CONSTRAINT public recon_comparative recon_comparative_book_code_fiscal_code_key postgres
+5793; 2606 35288 CONSTRAINT public recon_comparative recon_comparative_pkey postgres
+5779; 2606 35245 CONSTRAINT public recon_marketing recon_marketing_book_code_fiscal_code_key postgres
+5781; 2606 35243 CONSTRAINT public recon_marketing recon_marketing_pkey postgres
+5795; 2606 35302 CONSTRAINT public recon_modules recon_modules_pkey postgres
+5797; 2606 35304 CONSTRAINT public recon_modules recon_modules_slug_key postgres
+5799; 2606 35306 CONSTRAINT public recon_modules recon_modules_tbl_key postgres
+5801; 2606 35321 CONSTRAINT public recon_opening_stock_2080 recon_opening_stock_2080_book_code_fiscal_code_key postgres
+5803; 2606 35319 CONSTRAINT public recon_opening_stock_2080 recon_opening_stock_2080_pkey postgres
+5809; 2606 35351 CONSTRAINT public recon_pkr recon_pkr_book_code_fiscal_code_key postgres
+5811; 2606 35349 CONSTRAINT public recon_pkr recon_pkr_pkey postgres
+5787; 2606 35275 CONSTRAINT public recon_software recon_software_book_code_fiscal_code_key postgres
+5789; 2606 35273 CONSTRAINT public recon_software recon_software_pkey postgres
+5783; 2606 35260 CONSTRAINT public recon_stockkeeper recon_stockkeeper_book_code_fiscal_code_key postgres
+5785; 2606 35258 CONSTRAINT public recon_stockkeeper recon_stockkeeper_pkey postgres
+5501; 2606 16762 CONSTRAINT public shifts shifts_pkey postgres
+5728; 2606 28976 CONSTRAINT public system_settings system_settings_key_key postgres
+5730; 2606 28974 CONSTRAINT public system_settings system_settings_pkey postgres
+5616; 2606 18791 CONSTRAINT public monthly_vehicle_summary uk_summary_vehicle_month postgres
+5667; 2606 28278 CONSTRAINT public attendance uq_attendance_emp_date postgres
+5655; 2606 28254 CONSTRAINT public attendance_status uq_attendance_status_code postgres
+5696; 2606 28818 CONSTRAINT public zkteco_user_mapping uq_device_user postgres
+5548; 2606 19435 CONSTRAINT public employee uq_employee_card_id postgres
+5550; 2606 19431 CONSTRAINT public employee uq_employee_code postgres
+5552; 2606 19433 CONSTRAINT public employee uq_employee_pan postgres
+5651; 2606 28231 CONSTRAINT public holidays uq_holiday_date_year postgres
+5643; 2606 28217 CONSTRAINT public holiday_types uq_holiday_type_name postgres
+5682; 2606 28359 CONSTRAINT public leave_balance uq_leave_balance postgres
+5674; 2606 28324 CONSTRAINT public attendance_monthly_summary uq_monthly_summary postgres
+5483; 2606 16537 CONSTRAINT public users users_pkey postgres
+5485; 2606 16539 CONSTRAINT public users users_username_key postgres
+5620; 2606 18819 CONSTRAINT public vehicle_audit_logs vehicle_audit_logs_pkey postgres
+5609; 2606 18755 CONSTRAINT public vehicle_daily_logs vehicle_daily_logs_pkey postgres
+5594; 2606 18654 CONSTRAINT public vehicle_driver_assignments vehicle_driver_assignments_pkey postgres
+5632; 2606 18913 CONSTRAINT public vehicle_maintenance_records vehicle_maintenance_records_pkey postgres
+5584; 2606 18605 CONSTRAINT public vehicles vehicles_pkey postgres
+5586; 2606 18607 CONSTRAINT public vehicles vehicles_vehicle_no_key postgres
+5714; 2606 28907 CONSTRAINT public zkteco_capacity_log zkteco_capacity_log_pkey postgres
+5688; 2606 28795 CONSTRAINT public zkteco_devices zkteco_devices_device_code_key postgres
+5690; 2606 28793 CONSTRAINT public zkteco_devices zkteco_devices_pkey postgres
+5704; 2606 28854 CONSTRAINT public zkteco_pull_log zkteco_pull_log_pkey postgres
+5720; 2606 28925 CONSTRAINT public zkteco_raw_attendance zkteco_raw_attendance_pkey postgres
+5723; 2606 28960 CONSTRAINT public zkteco_settings zkteco_settings_pkey postgres
+5725; 2606 28962 CONSTRAINT public zkteco_settings zkteco_settings_setting_key_key postgres
+5710; 2606 28879 CONSTRAINT public zkteco_sync_queue zkteco_sync_queue_pkey postgres
+5698; 2606 28816 CONSTRAINT public zkteco_user_mapping zkteco_user_mapping_pkey postgres
+5765; 1259 30358 INDEX public deno_test_book_code_idx postgres
+5766; 1259 30361 INDEX public deno_test_bp_id_idx postgres
+5767; 1259 30365 INDEX public deno_test_created_by_idx postgres
+5768; 1259 30362 INDEX public deno_test_d2m_id_idx postgres
+5769; 1259 30359 INDEX public deno_test_deleted_at_idx postgres
+5770; 1259 30363 INDEX public deno_test_entry_type_idx postgres
+5771; 1259 30360 INDEX public deno_test_jt_id_idx postgres
+5774; 1259 30367 INDEX public deno_test_received_by_idx postgres
+5775; 1259 30364 INDEX public deno_test_sender_by_idx postgres
+5776; 1259 30366 INDEX public deno_test_updated_by_idx postgres
+5777; 1259 30368 INDEX public deno_test_verify_by_idx postgres
+5590; 1259 18677 INDEX public idx_assignments_active postgres
+5591; 1259 18676 INDEX public idx_assignments_driver postgres
+5592; 1259 18675 INDEX public idx_assignments_vehicle postgres
+5658; 1259 28519 INDEX public idx_attendance_data_source postgres
+5659; 1259 28296 INDEX public idx_attendance_date_eng postgres
+5660; 1259 28295 INDEX public idx_attendance_date_nep postgres
+5661; 1259 28520 INDEX public idx_attendance_device postgres
+5662; 1259 28294 INDEX public idx_attendance_employee postgres
+5663; 1259 28299 INDEX public idx_attendance_ot postgres
+5664; 1259 28298 INDEX public idx_attendance_shift postgres
+5665; 1259 28297 INDEX public idx_attendance_status postgres
+5512; 1259 16853 INDEX public idx_audit_log_action postgres
+5513; 1259 16854 INDEX public idx_audit_log_changed_at postgres
+5514; 1259 16850 INDEX public idx_audit_log_module postgres
+5515; 1259 16852 INDEX public idx_audit_log_record postgres
+5516; 1259 16851 INDEX public idx_audit_log_table postgres
+5617; 1259 18821 INDEX public idx_audit_performed_at postgres
+5618; 1259 18820 INDEX public idx_audit_table_record postgres
+5519; 1259 16920 INDEX public idx_book_packing_book_code postgres
+5520; 1259 16925 INDEX public idx_book_packing_created_date postgres
+5521; 1259 16924 INDEX public idx_book_packing_date_nep postgres
+5522; 1259 16923 INDEX public idx_book_packing_fiscal_year postgres
+5523; 1259 16919 INDEX public idx_book_packing_jt_id postgres
+5524; 1259 16922 INDEX public idx_book_packing_packing_status postgres
+5525; 1259 16921 INDEX public idx_book_packing_status postgres
+5597; 1259 18710 INDEX public idx_coupons_fiscal_month postgres
+5598; 1259 18711 INDEX public idx_coupons_vehicle postgres
+5599; 1259 18712 INDEX public idx_coupons_verified postgres
+5735; 1259 29738 INDEX public idx_ctp_jobs_book postgres
+5736; 1259 29740 INDEX public idx_ctp_jobs_created postgres
+5737; 1259 29739 INDEX public idx_ctp_jobs_status postgres
+5569; 1259 17569 INDEX public idx_d2m_checked_by postgres
+5570; 1259 17568 INDEX public idx_d2m_created_by postgres
+5571; 1259 17564 INDEX public idx_d2m_eng_date postgres
+5572; 1259 17566 INDEX public idx_d2m_fy postgres
+5580; 1259 17587 INDEX public idx_d2m_items_deno_ids postgres
+5573; 1259 17563 INDEX public idx_d2m_nep_date postgres
+5574; 1259 17567 INDEX public idx_d2m_status postgres
+5575; 1259 17565 INDEX public idx_d2m_type postgres
+5576; 1259 17570 INDEX public idx_d2m_verified_by postgres
+5471; 1259 16511 INDEX public idx_deno_book_code postgres
+5472; 1259 17815 INDEX public idx_deno_bp_id postgres
+5473; 1259 19509 INDEX public idx_deno_created_by postgres
+5474; 1259 17816 INDEX public idx_deno_d2m_id postgres
+5475; 1259 17571 INDEX public idx_deno_deleted_at postgres
+5476; 1259 17817 INDEX public idx_deno_entry_type postgres
+5477; 1259 17814 INDEX public idx_deno_jt_id postgres
+5478; 1259 19511 INDEX public idx_deno_received_by postgres
+5479; 1259 19464 INDEX public idx_deno_sender_by postgres
+5480; 1259 19510 INDEX public idx_deno_updated_by postgres
+5481; 1259 19512 INDEX public idx_deno_verify_by postgres
+5602; 1259 18741 INDEX public idx_distributions_coupon postgres
+5603; 1259 18742 INDEX public idx_distributions_date postgres
+5589; 1259 18642 INDEX public idx_drivers_status postgres
+5558; 1259 17056 INDEX public idx_education_emp_id postgres
+5561; 1259 17058 INDEX public idx_emp_designation_dates postgres
+5562; 1259 17057 INDEX public idx_emp_designation_emp_id postgres
+5555; 1259 17055 INDEX public idx_emp_family_emp_id postgres
+5536; 1259 19442 INDEX public idx_employee_card_id postgres
+5537; 1259 17051 INDEX public idx_employee_code postgres
+5538; 1259 19443 INDEX public idx_employee_deleted postgres
+5539; 1259 17054 INDEX public idx_employee_designation postgres
+5540; 1259 17052 INDEX public idx_employee_email postgres
+5541; 1259 19439 INDEX public idx_employee_fiscal_year postgres
+5542; 1259 19440 INDEX public idx_employee_is_technical postgres
+5543; 1259 19445 INDEX public idx_employee_local_body postgres
+5544; 1259 17053 INDEX public idx_employee_mobile postgres
+5545; 1259 19441 INDEX public idx_employee_pan postgres
+5546; 1259 19444 INDEX public idx_employee_state postgres
+5744; 1259 29781 INDEX public idx_fctp_books_code postgres
+5754; 1259 29848 INDEX public idx_fctp_formas_book postgres
+5755; 1259 29847 INDEX public idx_fctp_formas_jt postgres
+5756; 1259 29850 INDEX public idx_fctp_formas_order postgres
+5757; 1259 29849 INDEX public idx_fctp_formas_status postgres
+5758; 1259 29851 INDEX public idx_fctp_formas_unique postgres
+5749; 1259 29804 INDEX public idx_fctp_jt_book postgres
+5750; 1259 29805 INDEX public idx_fctp_jt_code postgres
+5751; 1259 29806 INDEX public idx_fctp_jt_status postgres
+5763; 1259 29898 INDEX public idx_fctp_uploads_book postgres
+5764; 1259 29897 INDEX public idx_fctp_uploads_forma postgres
+5504; 1259 16833 INDEX public idx_forma_printing_created_date postgres
+5505; 1259 16829 INDEX public idx_forma_printing_fiscal_year postgres
+5506; 1259 16830 INDEX public idx_forma_printing_jt_id postgres
+5507; 1259 16831 INDEX public idx_forma_printing_jtd_id postgres
+5508; 1259 16832 INDEX public idx_forma_printing_machine_id postgres
+5509; 1259 16834 INDEX public idx_forma_printing_status postgres
+5638; 1259 19064 INDEX public idx_fuel_price_fiscal_month postgres
+5639; 1259 19065 INDEX public idx_fuel_price_type postgres
+5646; 1259 28238 INDEX public idx_holidays_date_eng postgres
+5647; 1259 28237 INDEX public idx_holidays_date_nep postgres
+5648; 1259 28239 INDEX public idx_holidays_fiscal_year postgres
+5649; 1259 28240 INDEX public idx_holidays_type postgres
+5677; 1259 28365 INDEX public idx_leave_balance_employee postgres
+5678; 1259 28366 INDEX public idx_leave_balance_fiscal_year postgres
+5604; 1259 18777 INDEX public idx_logs_driver postgres
+5605; 1259 18778 INDEX public idx_logs_fiscal_year postgres
+5606; 1259 19415 INDEX public idx_logs_month_nep postgres
+5607; 1259 18776 INDEX public idx_logs_vehicle_date postgres
+5626; 1259 18936 INDEX public idx_maintenance_date postgres
+5627; 1259 18938 INDEX public idx_maintenance_fiscal_year postgres
+5628; 1259 18937 INDEX public idx_maintenance_status postgres
+5629; 1259 18935 INDEX public idx_maintenance_type postgres
+5621; 1259 18894 INDEX public idx_maintenance_types_status postgres
+5630; 1259 18934 INDEX public idx_maintenance_vehicle postgres
+5670; 1259 28330 INDEX public idx_monthly_summary_employee postgres
+5671; 1259 28332 INDEX public idx_monthly_summary_fiscal_year postgres
+5672; 1259 28331 INDEX public idx_monthly_summary_month postgres
+5633; 1259 18961 INDEX public idx_parts_maintenance postgres
+5610; 1259 18807 INDEX public idx_summary_fiscal_month postgres
+5611; 1259 18809 INDEX public idx_summary_overuse postgres
+5612; 1259 18808 INDEX public idx_summary_vehicle postgres
+5726; 1259 28977 INDEX public idx_system_settings_key postgres
+5581; 1259 18619 INDEX public idx_vehicles_fiscal_year postgres
+5582; 1259 18618 INDEX public idx_vehicles_status postgres
+5711; 1259 28913 INDEX public idx_zkteco_capacity_device postgres
+5712; 1259 28914 INDEX public idx_zkteco_capacity_logged postgres
+5683; 1259 28796 INDEX public idx_zkteco_devices_active postgres
+5684; 1259 28799 INDEX public idx_zkteco_devices_code postgres
+5685; 1259 28797 INDEX public idx_zkteco_devices_priority postgres
+5686; 1259 28798 INDEX public idx_zkteco_devices_status postgres
+5691; 1259 28837 INDEX public idx_zkteco_mapping_active postgres
+5692; 1259 28834 INDEX public idx_zkteco_mapping_device postgres
+5693; 1259 28836 INDEX public idx_zkteco_mapping_device_user postgres
+5694; 1259 28835 INDEX public idx_zkteco_mapping_employee postgres
+5699; 1259 28860 INDEX public idx_zkteco_pull_log_date postgres
+5700; 1259 28861 INDEX public idx_zkteco_pull_log_device postgres
+5701; 1259 28863 INDEX public idx_zkteco_pull_log_schedule postgres
+5702; 1259 28862 INDEX public idx_zkteco_pull_log_status postgres
+5715; 1259 28946 INDEX public idx_zkteco_raw_device postgres
+5716; 1259 28949 INDEX public idx_zkteco_raw_device_user postgres
+5717; 1259 28948 INDEX public idx_zkteco_raw_processed postgres
+5718; 1259 28947 INDEX public idx_zkteco_raw_time postgres
+5721; 1259 28963 INDEX public idx_zkteco_settings_key postgres
+5705; 1259 28890 INDEX public idx_zkteco_sync_device postgres
+5706; 1259 28891 INDEX public idx_zkteco_sync_employee postgres
+5707; 1259 28893 INDEX public idx_zkteco_sync_priority postgres
+5708; 1259 28892 INDEX public idx_zkteco_sync_status postgres
+5577; 1259 17562 INDEX public uniq_d2m_day postgres
+6094; 2618 29907 RULE public v_fctp_job_summary _RETURN postgres
+5918; 2620 16859 TRIGGER public deno deno_audit postgres
+5924; 2620 16858 TRIGGER public forma_printing forma_printing_audit postgres
+5931; 2620 28385 TRIGGER public attendance trg_attendance_calculate_hours postgres
+5919; 2620 16871 TRIGGER public deno trg_deno_delete postgres
+5920; 2620 16510 TRIGGER public deno trg_deno_fields postgres
+5921; 2620 16869 TRIGGER public deno trg_deno_insert postgres
+5922; 2620 16870 TRIGGER public deno trg_deno_update postgres
+5925; 2620 19447 TRIGGER public employee trg_generate_employee_code postgres
+5926; 2620 19449 TRIGGER public employee trg_set_fiscal_year postgres
+5929; 2620 38244 TRIGGER public vehicle_daily_logs trg_set_month_nep postgres
+5923; 2620 16553 TRIGGER public fiscal_years trg_single_active_fiscal_year postgres
+5927; 2620 19456 TRIGGER public employee trg_validate_employee postgres
+5930; 2620 38242 TRIGGER public vehicle_daily_logs trg_vehicle_logs_month_nep postgres
+5928; 2620 18984 TRIGGER public fuel_coupon_distributions trigger_auto_set_fuel_price postgres
+5896; 2606 28279 FK CONSTRAINT public attendance attendance_employee_id_fkey postgres
+5899; 2606 28325 FK CONSTRAINT public attendance_monthly_summary attendance_monthly_summary_employee_id_fkey postgres
+5897; 2606 28284 FK CONSTRAINT public attendance attendance_shift_id_fkey postgres
+5898; 2606 28289 FK CONSTRAINT public attendance attendance_status_id_fkey postgres
+5837; 2606 16845 FK CONSTRAINT public audit_log audit_log_changed_by_fkey postgres
+5838; 2606 16904 FK CONSTRAINT public book_packing book_packing_created_by_fkey postgres
+5839; 2606 16914 FK CONSTRAINT public book_packing book_packing_fiscal_year_id_fkey postgres
+5840; 2606 16894 FK CONSTRAINT public book_packing book_packing_incharge_id_fkey postgres
+5841; 2606 16884 FK CONSTRAINT public book_packing book_packing_jt_id_fkey postgres
+5842; 2606 16899 FK CONSTRAINT public book_packing book_packing_operator_id_fkey postgres
+5843; 2606 16889 FK CONSTRAINT public book_packing book_packing_supervisor_id_fkey postgres
+5844; 2606 16909 FK CONSTRAINT public book_packing book_packing_updated_by_fkey postgres
+5912; 2606 29723 FK CONSTRAINT public ctp_export_jobs ctp_export_jobs_book_code_fkey postgres
+5913; 2606 29728 FK CONSTRAINT public ctp_export_jobs ctp_export_jobs_deno_id_fkey postgres
+5914; 2606 29733 FK CONSTRAINT public ctp_export_jobs ctp_export_jobs_template_id_fkey postgres
+5862; 2606 17820 FK CONSTRAINT public d2m_items d2m_items_book_code_fkey postgres
+5863; 2606 17580 FK CONSTRAINT public d2m_items d2m_items_d2m_id_fkey postgres
+5812; 2606 16505 FK CONSTRAINT public deno deno_book_code_fkey postgres
+5813; 2606 17803 FK CONSTRAINT public deno deno_bp_id_fkey postgres
+5814; 2606 19489 FK CONSTRAINT public deno deno_created_by_fkey postgres
+5815; 2606 17808 FK CONSTRAINT public deno deno_d2m_id_fkey postgres
+5816; 2606 17798 FK CONSTRAINT public deno deno_jt_id_fkey postgres
+5817; 2606 19499 FK CONSTRAINT public deno deno_received_by_fkey postgres
+5818; 2606 19459 FK CONSTRAINT public deno deno_sender_by_fkey postgres
+5819; 2606 19494 FK CONSTRAINT public deno deno_updated_by_fkey postgres
+5820; 2606 19504 FK CONSTRAINT public deno deno_verify_by_fkey postgres
+5850; 2606 17012 FK CONSTRAINT public education_details education_details_emp_id_fkey postgres
+5845; 2606 16980 FK CONSTRAINT public employee employee_department_id_fkey postgres
+5851; 2606 17046 FK CONSTRAINT public employee_designation employee_designation_department_id_fkey postgres
+5852; 2606 17036 FK CONSTRAINT public employee_designation employee_designation_designation_id_fkey postgres
+5853; 2606 17031 FK CONSTRAINT public employee_designation employee_designation_emp_id_fkey postgres
+5846; 2606 16970 FK CONSTRAINT public employee employee_designation_id_fkey postgres
+5854; 2606 17041 FK CONSTRAINT public employee_designation employee_designation_level_id_fkey postgres
+5855; 2606 17071 FK CONSTRAINT public employee_documents employee_documents_employee_id_fkey postgres
+5849; 2606 16995 FK CONSTRAINT public employee_family employee_family_emp_id_fkey postgres
+5847; 2606 19425 FK CONSTRAINT public employee employee_fiscal_year_id_fkey postgres
+5848; 2606 16975 FK CONSTRAINT public employee employee_level_id_fkey postgres
+5916; 2606 29842 FK CONSTRAINT public fctp_formas fctp_formas_job_ticket_id_fkey postgres
+5915; 2606 29799 FK CONSTRAINT public fctp_job_tickets fctp_job_tickets_book_code_fkey postgres
+5917; 2606 29892 FK CONSTRAINT public fctp_uploads fctp_uploads_forma_id_fkey postgres
+5868; 2606 18665 FK CONSTRAINT public vehicle_driver_assignments fk_assignment_created_by postgres
+5869; 2606 18660 FK CONSTRAINT public vehicle_driver_assignments fk_assignment_driver postgres
+5870; 2606 18670 FK CONSTRAINT public vehicle_driver_assignments fk_assignment_updated_by postgres
+5871; 2606 18655 FK CONSTRAINT public vehicle_driver_assignments fk_assignment_vehicle postgres
+5825; 2606 16663 FK CONSTRAINT public forma fk_book postgres
+5872; 2606 18700 FK CONSTRAINT public fuel_coupons fk_coupon_created_by postgres
+5873; 2606 18705 FK CONSTRAINT public fuel_coupons fk_coupon_updated_by postgres
+5874; 2606 18695 FK CONSTRAINT public fuel_coupons fk_coupon_vehicle postgres
+5856; 2606 17540 FK CONSTRAINT public d2m fk_d2m_checked_by postgres
+5857; 2606 17535 FK CONSTRAINT public d2m fk_d2m_created_by postgres
+5858; 2606 17555 FK CONSTRAINT public d2m fk_d2m_deleted_by postgres
+5859; 2606 17530 FK CONSTRAINT public d2m fk_d2m_fy postgres
+5860; 2606 17550 FK CONSTRAINT public d2m fk_d2m_updated_by postgres
+5861; 2606 17545 FK CONSTRAINT public d2m fk_d2m_verified_by postgres
+5875; 2606 18726 FK CONSTRAINT public fuel_coupon_distributions fk_distribution_coupon postgres
+5876; 2606 18731 FK CONSTRAINT public fuel_coupon_distributions fk_distribution_created_by postgres
+5877; 2606 18736 FK CONSTRAINT public fuel_coupon_distributions fk_distribution_updated_by postgres
+5866; 2606 18632 FK CONSTRAINT public drivers fk_driver_created_by postgres
+5867; 2606 18637 FK CONSTRAINT public drivers fk_driver_updated_by postgres
+5878; 2606 18766 FK CONSTRAINT public vehicle_daily_logs fk_log_created_by postgres
+5879; 2606 18761 FK CONSTRAINT public vehicle_daily_logs fk_log_driver postgres
+5880; 2606 18771 FK CONSTRAINT public vehicle_daily_logs fk_log_updated_by postgres
+5881; 2606 18756 FK CONSTRAINT public vehicle_daily_logs fk_log_vehicle postgres
+5887; 2606 18924 FK CONSTRAINT public vehicle_maintenance_records fk_maint_created_by postgres
+5888; 2606 18919 FK CONSTRAINT public vehicle_maintenance_records fk_maint_type postgres
+5885; 2606 18884 FK CONSTRAINT public maintenance_types fk_maint_type_created_by postgres
+5886; 2606 18889 FK CONSTRAINT public maintenance_types fk_maint_type_updated_by postgres
+5889; 2606 18929 FK CONSTRAINT public vehicle_maintenance_records fk_maint_updated_by postgres
+5890; 2606 18914 FK CONSTRAINT public vehicle_maintenance_records fk_maint_vehicle postgres
+5891; 2606 18956 FK CONSTRAINT public maintenance_parts fk_part_created_by postgres
+5892; 2606 18951 FK CONSTRAINT public maintenance_parts fk_part_maintenance postgres
+5893; 2606 19054 FK CONSTRAINT public fuel_price_history fk_price_created_by postgres
+5894; 2606 19059 FK CONSTRAINT public fuel_price_history fk_price_updated_by postgres
+5882; 2606 18797 FK CONSTRAINT public monthly_vehicle_summary fk_summary_created_by postgres
+5883; 2606 18802 FK CONSTRAINT public monthly_vehicle_summary fk_summary_updated_by postgres
+5884; 2606 18792 FK CONSTRAINT public monthly_vehicle_summary fk_summary_vehicle postgres
+5864; 2606 18608 FK CONSTRAINT public vehicles fk_vehicle_created_by postgres
+5865; 2606 18613 FK CONSTRAINT public vehicles fk_vehicle_updated_by postgres
+5826; 2606 16794 FK CONSTRAINT public forma_printing forma_printing_created_by_fkey postgres
+5827; 2606 16824 FK CONSTRAINT public forma_printing forma_printing_delete_by_fkey postgres
+5828; 2606 16774 FK CONSTRAINT public forma_printing forma_printing_fiscal_year_id_fkey postgres
+5829; 2606 16804 FK CONSTRAINT public forma_printing forma_printing_incharge_id_fkey postgres
+5830; 2606 16779 FK CONSTRAINT public forma_printing forma_printing_jt_id_fkey postgres
+5831; 2606 16784 FK CONSTRAINT public forma_printing forma_printing_jtd_id_fkey postgres
+5832; 2606 16814 FK CONSTRAINT public forma_printing forma_printing_machine_id_fkey postgres
+5833; 2606 16799 FK CONSTRAINT public forma_printing forma_printing_operator_id_fkey postgres
+5834; 2606 16809 FK CONSTRAINT public forma_printing forma_printing_shift_id_fkey postgres
+5835; 2606 16789 FK CONSTRAINT public forma_printing forma_printing_supervisor_id_fkey postgres
+5836; 2606 16819 FK CONSTRAINT public forma_printing forma_printing_updated_by_fkey postgres
+5895; 2606 28232 FK CONSTRAINT public holidays holidays_holiday_type_id_fkey postgres
+5821; 2606 16599 FK CONSTRAINT public job_ticket job_ticket_book_id_fkey postgres
+5822; 2606 16609 FK CONSTRAINT public job_ticket job_ticket_created_by_fkey postgres
+5824; 2606 16625 FK CONSTRAINT public job_ticket_details job_ticket_details_job_ticket_id_fkey postgres
+5823; 2606 16604 FK CONSTRAINT public job_ticket job_ticket_fiscal_year_id_fkey postgres
+5900; 2606 28360 FK CONSTRAINT public leave_balance leave_balance_employee_id_fkey postgres
+5907; 2606 28908 FK CONSTRAINT public zkteco_capacity_log zkteco_capacity_log_device_id_fkey postgres
+5904; 2606 28855 FK CONSTRAINT public zkteco_pull_log zkteco_pull_log_device_id_fkey postgres
+5908; 2606 28936 FK CONSTRAINT public zkteco_raw_attendance zkteco_raw_attendance_attendance_id_fkey postgres
+5909; 2606 28926 FK CONSTRAINT public zkteco_raw_attendance zkteco_raw_attendance_device_id_fkey postgres
+5910; 2606 28931 FK CONSTRAINT public zkteco_raw_attendance zkteco_raw_attendance_employee_id_fkey postgres
+5911; 2606 28941 FK CONSTRAINT public zkteco_raw_attendance zkteco_raw_attendance_pull_log_id_fkey postgres
+5905; 2606 28880 FK CONSTRAINT public zkteco_sync_queue zkteco_sync_queue_device_id_fkey postgres
+5906; 2606 28885 FK CONSTRAINT public zkteco_sync_queue zkteco_sync_queue_employee_id_fkey postgres
+5901; 2606 28819 FK CONSTRAINT public zkteco_user_mapping zkteco_user_mapping_device_id_fkey postgres
+5902; 2606 28824 FK CONSTRAINT public zkteco_user_mapping zkteco_user_mapping_employee_id_fkey postgres
+5903; 2606 28829 FK CONSTRAINT public zkteco_user_mapping zkteco_user_mapping_shift_id_fkey postgres
