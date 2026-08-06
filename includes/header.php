@@ -139,6 +139,9 @@ function getUrl($path = '') {
     <div class="collapse" id="mReports">
         <a class="dropdown-item" href="<?= getUrl('reports.php') ?>">All Reports</a>
         <a class="dropdown-item" href="<?= getUrl('denoreports/daily.php') ?>">Deno Daily</a>
+        <a class="dropdown-item" href="<?= getUrl('d2mreports/daily.php') ?>">D2M Daily</a>
+        <a class="dropdown-item" href="<?= getUrl('d2mreports/monthly.php') ?>">D2M Monthly</a>
+        <a class="dropdown-item" href="<?= getUrl('d2mreports/yearly.php') ?>">D2M Yearly</a>
         <a class="dropdown-item" href="<?= getUrl('report/index.php') ?>">Compare Marketing</a>
         <a class="dropdown-item" href="<?= getUrl('attendance_device/attendance_report.php') ?>">Attendance PDF</a>
     </div>
@@ -228,6 +231,9 @@ function getUrl($path = '') {
     <ul class="dropdown-menu">
         <li><a class="dropdown-item" href="<?= getUrl('reports.php') ?>">All Reports</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('denoreports/daily.php') ?>">Deno Daily</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('d2mreports/daily.php') ?>">D2M Daily</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('d2mreports/monthly.php') ?>">D2M Monthly</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('d2mreports/yearly.php') ?>">D2M Yearly</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('report/index.php') ?>">Compare Marketing</a></li>
         <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="<?= getUrl('attendance_device/attendance_report.php') ?>"><i class="bi bi-file-pdf me-1"></i>Attendance PDF</a></li>
