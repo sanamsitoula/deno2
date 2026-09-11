@@ -159,8 +159,14 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
 <div class="gd-wrap">
 
-  <h2 class="gd-title">🏬 Goddam (Store) Management</h2>
-  <p class="gd-subtitle">Warehouses that Marketing Inward receipts are booked into. See also <a href="<?= getUrl('goddam/handlers.php') ?>">Handler Assignments</a>.</p>
+  <div style="display:flex; justify-content:space-between; align-items:flex-start; flex-wrap:wrap; gap:12px;">
+    <div>
+      <h2 class="gd-title">🏬 Goddam (Store) Management</h2>
+      <p class="gd-subtitle" style="margin-bottom:0;">Warehouses that Marketing Inward receipts are booked into.</p>
+    </div>
+    <a href="<?= getUrl('goddam/handlers.php') ?>" class="btn btn-primary" style="white-space:nowrap;">🔑 Manage Handler Assignments</a>
+  </div>
+  <div style="height:18px;"></div>
 
   <?php if ($success): ?><div class="gd-alert ok">✓ <?= $success ?></div><?php endif; ?>
   <?php if (!empty($errors)): ?>

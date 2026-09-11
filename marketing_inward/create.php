@@ -310,6 +310,25 @@ $today_bs = str_replace('-', '.', DateConverter::todayBs());
       </div>
     </form>
 
+    <?php if (empty($goddam_options)): ?>
+      <div class="no-items">
+        <?php if ($is_admin): ?>
+          No active goddams exist yet. <a href="<?= getUrl('goddam/index.php') ?>">Create one first</a>.
+        <?php else: ?>
+          You have no active goddam handler assignment yet — an admin needs to add one for you (with a class,
+          book type, and today's date inside its active window) via
+          <a href="<?= getUrl('goddam/handlers.php') ?>">Goddam → Handler Assignments</a> before you can create a
+          Marketing Inward.
+        <?php endif; ?>
+      </div>
+    <?php elseif (empty($d2m_options)): ?>
+      <div class="no-items">
+        No D2M currently has outstanding lines to inward — either none are <?= $is_admin ? '' : 'yet' ?>
+        VERIFIED/CLOSE/APPROVED, or every VERIFIED D2M has already been fully received. Check
+        <a href="<?= getUrl('d2m/index.php') ?>">D2M records</a>.
+      </div>
+    <?php endif; ?>
+
     <?php if ($d2m_id && $goddam_id && $d2m_row): ?>
       <?php if (empty($eligible_items)): ?>
         <div class="no-items">No eligible items for you on this D2M — either everything is already inwarded, or you don't have a class/type/date-window assignment (via Goddam → Handler Assignments) that covers this D2M's remaining lines.</div>

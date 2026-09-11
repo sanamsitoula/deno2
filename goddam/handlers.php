@@ -13,7 +13,70 @@ $success = '';
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $action = $_POST['action'] ?? '';
 
-    if ($action === 'add_handler' || $action === 'edit_handler') {
+    if ($action === 'add_handler') {
+        // Bulk create: any number of classes x either/both book types in one
+        // submission, so "class 1, 5, 7, both T and NT" is one form submit
+        // instead of six.
+        $goddam_id       = (int)($_POST['goddam_id'] ?? 0);
+        $user_id         = (int)($_POST['user_id'] ?? 0);
+        $class_levels    = array_filter(array_map('intval', $_POST['class_levels'] ?? []));
+        $book_types      = array_values(array_intersect($_POST['book_types'] ?? [], ['T', 'NT']));
+        $active_from_nep = trim($_POST['active_from_nep'] ?? '');
+        $active_from_eng = trim($_POST['active_from_eng'] ?? '');
+        $active_to_nep   = trim($_POST['active_to_nep'] ?? '');
+        $active_to_eng   = trim($_POST['active_to_eng'] ?? '');
+
+        if ($goddam_id <= 0) $errors[] = 'Goddam is required.';
+        if ($user_id <= 0) $errors[] = 'User is required.';
+        if (empty($class_levels)) $errors[] = 'Select at least one class.';
+        if (empty($book_types)) $errors[] = 'Select at least one book type (Translated / Non-Translated).';
+        if (!preg_match('/^\d{4}\.\d{2}\.\d{2}$/', $active_from_nep) || $active_from_eng === '') {
+            $errors[] = 'Valid "Active From" date is required.';
+        }
+        if ($active_to_nep !== '' && (!preg_match('/^\d{4}\.\d{2}\.\d{2}$/', $active_to_nep) || $active_to_eng === '')) {
+            $errors[] = 'If "Active To" is set, it must be a valid date.';
+        }
+        if ($active_to_eng !== '' && $active_to_eng < $active_from_eng) {
+            $errors[] = '"Active To" cannot be before "Active From".';
+        }
+
+        if (empty($errors)) {
+            try {
+                $stmt = $conn->prepare("
+                    INSERT INTO goddam_handlers
+                        (goddam_id, user_id, class_level, book_type,
+                         active_from_nep, active_from_eng, active_to_nep, active_to_eng, created_by)
+                    VALUES
+                        (:goddam_id, :user_id, :class_level, :book_type,
+                         :from_nep, :from_eng, :to_nep, :to_eng, :uid)
+                    ON CONFLICT ON CONSTRAINT goddam_handlers_unique DO NOTHING
+                    RETURNING id
+                ");
+                $created = 0;
+                $skipped = 0;
+                foreach ($class_levels as $class_level) {
+                    foreach ($book_types as $book_type) {
+                        $stmt->execute([
+                            ':goddam_id' => $goddam_id, ':user_id' => $user_id,
+                            ':class_level' => $class_level, ':book_type' => $book_type,
+                            ':from_nep' => $active_from_nep, ':from_eng' => $active_from_eng,
+                            ':to_nep' => $active_to_nep !== '' ? $active_to_nep : null,
+                            ':to_eng' => $active_to_eng !== '' ? $active_to_eng : null,
+                            ':uid' => $_SESSION['user_id'],
+                        ]);
+                        $stmt->fetch() ? $created++ : $skipped++;
+                    }
+                }
+                $success = "Created {$created} handler assignment(s)."
+                    . ($skipped > 0 ? " {$skipped} already existed and were left as-is." : "");
+            } catch (PDOException $e) {
+                $errors[] = "Database error: " . $e->getMessage();
+            }
+        }
+
+    } elseif ($action === 'edit_handler') {
+        // Editing an existing row stays single-value — it's one specific
+        // assignment, not a batch of new ones.
         $id              = (int)($_POST['handler_id'] ?? 0);
         $goddam_id       = (int)($_POST['goddam_id'] ?? 0);
         $user_id         = (int)($_POST['user_id'] ?? 0);
@@ -24,6 +87,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $active_to_nep   = trim($_POST['active_to_nep'] ?? '');
         $active_to_eng   = trim($_POST['active_to_eng'] ?? '');
 
+        if ($id <= 0) $errors[] = 'Invalid handler ID.';
         if ($goddam_id <= 0) $errors[] = 'Goddam is required.';
         if ($user_id <= 0) $errors[] = 'User is required.';
         if ($class_level <= 0) $errors[] = 'Class is required.';
@@ -31,7 +95,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         if (!preg_match('/^\d{4}\.\d{2}\.\d{2}$/', $active_from_nep) || $active_from_eng === '') {
             $errors[] = 'Valid "Active From" date is required.';
         }
-        // "Active To" is optional — blank means open-ended/still active
         if ($active_to_nep !== '' && (!preg_match('/^\d{4}\.\d{2}\.\d{2}$/', $active_to_nep) || $active_to_eng === '')) {
             $errors[] = 'If "Active To" is set, it must be a valid date.';
         }
@@ -41,51 +104,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         if (empty($errors)) {
             try {
-                if ($action === 'add_handler') {
-                    $stmt = $conn->prepare("
-                        INSERT INTO goddam_handlers
-                            (goddam_id, user_id, class_level, book_type,
-                             active_from_nep, active_from_eng, active_to_nep, active_to_eng, created_by)
-                        VALUES
-                            (:goddam_id, :user_id, :class_level, :book_type,
-                             :from_nep, :from_eng, :to_nep, :to_eng, :uid)
-                    ");
-                    $stmt->execute([
-                        ':goddam_id' => $goddam_id, ':user_id' => $user_id,
-                        ':class_level' => $class_level, ':book_type' => $book_type,
-                        ':from_nep' => $active_from_nep, ':from_eng' => $active_from_eng,
-                        ':to_nep' => $active_to_nep !== '' ? $active_to_nep : null,
-                        ':to_eng' => $active_to_eng !== '' ? $active_to_eng : null,
-                        ':uid' => $_SESSION['user_id'],
-                    ]);
-                    $success = "Handler assignment created.";
-                } else {
-                    if ($id <= 0) throw new Exception('Invalid handler ID.');
-                    $stmt = $conn->prepare("
-                        UPDATE goddam_handlers
-                           SET goddam_id = :goddam_id, user_id = :user_id,
-                               class_level = :class_level, book_type = :book_type,
-                               active_from_nep = :from_nep, active_from_eng = :from_eng,
-                               active_to_nep = :to_nep, active_to_eng = :to_eng,
-                               updated_by = :uid, updated_at = NOW()
-                         WHERE id = :id
-                    ");
-                    $stmt->execute([
-                        ':goddam_id' => $goddam_id, ':user_id' => $user_id,
-                        ':class_level' => $class_level, ':book_type' => $book_type,
-                        ':from_nep' => $active_from_nep, ':from_eng' => $active_from_eng,
-                        ':to_nep' => $active_to_nep !== '' ? $active_to_nep : null,
-                        ':to_eng' => $active_to_eng !== '' ? $active_to_eng : null,
-                        ':uid' => $_SESSION['user_id'], ':id' => $id,
-                    ]);
-                    $success = "Handler assignment updated.";
-                }
+                $stmt = $conn->prepare("
+                    UPDATE goddam_handlers
+                       SET goddam_id = :goddam_id, user_id = :user_id,
+                           class_level = :class_level, book_type = :book_type,
+                           active_from_nep = :from_nep, active_from_eng = :from_eng,
+                           active_to_nep = :to_nep, active_to_eng = :to_eng,
+                           updated_by = :uid, updated_at = NOW()
+                     WHERE id = :id
+                ");
+                $stmt->execute([
+                    ':goddam_id' => $goddam_id, ':user_id' => $user_id,
+                    ':class_level' => $class_level, ':book_type' => $book_type,
+                    ':from_nep' => $active_from_nep, ':from_eng' => $active_from_eng,
+                    ':to_nep' => $active_to_nep !== '' ? $active_to_nep : null,
+                    ':to_eng' => $active_to_eng !== '' ? $active_to_eng : null,
+                    ':uid' => $_SESSION['user_id'], ':id' => $id,
+                ]);
+                $success = "Handler assignment updated.";
             } catch (PDOException $e) {
                 $msg = $e->getMessage();
                 $errors[] = (stripos($msg, 'unique') !== false || stripos($msg, 'duplicate') !== false)
                     ? "This user is already assigned that class/type at this goddam." : "Database error: " . $msg;
-            } catch (Exception $e) {
-                $errors[] = $e->getMessage();
             }
         }
 
@@ -178,6 +218,10 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 .modal-form-grid{ display:grid; gap:16px; grid-template-columns:1fr 1fr; }
 .modal-footer   { display:flex; justify-content:flex-end; gap:10px; margin-top:24px; grid-column:1/-1; }
 .field-note     { font-size:.75rem; color:#9ca3af; grid-column:1/-1; }
+.checkbox-group { display:flex; flex-wrap:wrap; gap:8px; padding:8px 0; }
+.checkbox-pill  { display:inline-flex; align-items:center; gap:5px; padding:6px 12px; border:1.5px solid #d1d5db; border-radius:20px; font-size:.85rem; cursor:pointer; background:#fff; }
+.checkbox-pill:has(input:checked) { background:#eef2ff; border-color:#6366f1; color:#4338ca; font-weight:600; }
+.checkbox-pill input { margin:0; }
 </style>
 
 <div class="gh-wrap">
@@ -220,22 +264,21 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
             <?php endforeach; ?>
           </select>
         </div>
-        <div class="form-group">
-          <label for="add_class_level">Class</label>
-          <select id="add_class_level" name="class_level" required>
-            <option value="">-- Select --</option>
+        <div class="form-group" style="grid-column:span 2;">
+          <label>Classes <span style="text-transform:none;font-weight:400;">(pick any number)</span></label>
+          <div class="checkbox-group">
+            <label class="checkbox-pill"><input type="checkbox" id="add_class_all"> <strong>All</strong></label>
             <?php foreach ($class_options as $c): ?>
-              <option value="<?= htmlspecialchars($c) ?>"><?= htmlspecialchars($c) ?></option>
+              <label class="checkbox-pill"><input type="checkbox" name="class_levels[]" value="<?= htmlspecialchars($c) ?>" class="add-class-cb"> <?= htmlspecialchars($c) ?></label>
             <?php endforeach; ?>
-          </select>
+          </div>
         </div>
         <div class="form-group">
-          <label for="add_book_type">Book Type</label>
-          <select id="add_book_type" name="book_type" required>
-            <option value="">-- Select --</option>
-            <option value="T">Translated (T)</option>
-            <option value="NT">Non-Translated (NT)</option>
-          </select>
+          <label>Book Type <span style="text-transform:none;font-weight:400;">(pick one or both)</span></label>
+          <div class="checkbox-group">
+            <label class="checkbox-pill"><input type="checkbox" name="book_types[]" value="T"> Translated (T)</label>
+            <label class="checkbox-pill"><input type="checkbox" name="book_types[]" value="NT"> Non-Translated (NT)</label>
+          </div>
         </div>
         <div class="form-group">
           <label>Active From</label>
@@ -374,6 +417,17 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 </div>
 
 <script>
+document.getElementById('add_class_all')?.addEventListener('change', function() {
+    document.querySelectorAll('.add-class-cb').forEach(cb => cb.checked = this.checked);
+});
+document.querySelectorAll('.add-class-cb').forEach(function(cb) {
+    cb.addEventListener('change', function() {
+        var all = document.querySelectorAll('.add-class-cb');
+        var checked = document.querySelectorAll('.add-class-cb:checked');
+        document.getElementById('add_class_all').checked = (all.length === checked.length);
+    });
+});
+
 function openEditModal(btn) {
     document.getElementById('edit_handler_id').value = btn.getAttribute('data-id');
     document.getElementById('edit_goddam_id').value   = btn.getAttribute('data-goddam');
