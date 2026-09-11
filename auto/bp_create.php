@@ -49,9 +49,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([':jt_id' => $jt_id]);
         $total_packed = (int)$stmt->fetch()['total_packed'];
 
-        // Validate: new p_qty + total_packed <= jt_print_qty
+        // Over-packing (new p_qty + total_packed > jt_print_qty) is allowed and saved —
+        // matches bookpacking/create.php's behavior; warn, don't block.
+        $overpack_warning = null;
         if ($p_qty + $total_packed > $jt_print_qty) {
-            throw new Exception("Total packed quantity ({$total_packed} + {$p_qty}) exceeds print quantity ({$jt_print_qty}).");
+            $overpack_warning = "Total packed quantity ({$total_packed} + {$p_qty} = " . ($total_packed + $p_qty) . ") exceeds job ticket print quantity ({$jt_print_qty}).";
         }
 
         // Insert packing record
@@ -110,7 +112,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $conn->commit();
 
-        $_SESSION['success_message'] = "Packing record created successfully!";
+        $_SESSION['success_message'] = "Packing record created successfully!" . ($overpack_warning ? " ⚠ {$overpack_warning}" : "");
         header('Location: view.php?id=' . $packing_id);
         exit();
 

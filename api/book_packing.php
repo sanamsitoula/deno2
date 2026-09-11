@@ -356,15 +356,19 @@ function handlePost($conn, $logged_in_user_id) {
 
         // Check total packed quantity
         $stmt = $conn->prepare("
-            SELECT COALESCE(SUM(p_qty), 0) as total_packed 
-            FROM book_packing 
+            SELECT COALESCE(SUM(p_qty), 0) as total_packed
+            FROM book_packing
             WHERE jt_id = :jt_id AND status = true
         ");
         $stmt->execute([':jt_id' => $jt_id]);
         $total_packed = (int)$stmt->fetch()['total_packed'];
 
+        // Over-packing (new p_qty + total_packed > jt_print_qty) is allowed and saved —
+        // matches bookpacking/create.php's behavior; a warning is returned instead of
+        // blocking the save, since a job ticket sometimes legitimately gets over-packed.
+        $overpack_warning = null;
         if ($p_qty + $total_packed > $jt_print_qty) {
-            throw new Exception("Total packed quantity (" . ($total_packed + $p_qty) . ") exceeds print quantity ($jt_print_qty)");
+            $overpack_warning = "Total packed quantity (" . ($total_packed + $p_qty) . ") exceeds print quantity ($jt_print_qty).";
         }
 
         // Insert packing record
@@ -412,7 +416,8 @@ function handlePost($conn, $logged_in_user_id) {
 
         echo json_encode([
             'success' => true,
-            'message' => 'Packing record created successfully',
+            'message' => 'Packing record created successfully' . ($overpack_warning ? ' ⚠ ' . $overpack_warning : ''),
+            'overpack_warning' => $overpack_warning,
             'data' => ['id' => $packing_id]
         ]);
     } catch (Exception $e) {
@@ -458,9 +463,10 @@ function handlePut($conn, $logged_in_user_id) {
         $stmt->execute([':jt_id' => $jt_id, ':id' => $id]);
         $total_packed_others = (int)$stmt->fetch()['total_packed'];
 
-        // Validate: new total should not exceed print qty
+        // Over-packing is allowed and saved (see handlePost) — warn, don't block.
+        $overpack_warning = null;
         if ($p_qty + $total_packed_others > $jt_print_qty) {
-            throw new Exception("Total packed quantity (" . ($total_packed_others + $p_qty) . ") exceeds print quantity ($jt_print_qty)");
+            $overpack_warning = "Total packed quantity (" . ($total_packed_others + $p_qty) . ") exceeds print quantity ($jt_print_qty).";
         }
 
         // Update packing record
@@ -520,7 +526,8 @@ function handlePut($conn, $logged_in_user_id) {
 
         echo json_encode([
             'success' => true,
-            'message' => 'Packing record updated successfully',
+            'message' => 'Packing record updated successfully' . ($overpack_warning ? ' ⚠ ' . $overpack_warning : ''),
+            'overpack_warning' => $overpack_warning,
             'data' => ['id' => $id]
         ]);
     } catch (Exception $e) {

@@ -624,6 +624,7 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
                        value="<?= $record['total_qty'] ?>" readonly>
                 <div class="calc-note">
                     💡 Total = (Per Poka × Pokas) + Open Pieces
+                    <small id="total_qty_breakdown" class="text-muted"></small>
                 </div>
             </div>
         </div>
@@ -907,11 +908,17 @@ document.addEventListener('DOMContentLoaded', function () {
     var openEl    = document.getElementById('quantity_openpcs');
     var totalEl   = document.getElementById('total_qty');
 
+    var breakdownEl = document.getElementById('total_qty_breakdown');
+
     function calcTotal() {
         var perPoka = parseInt(perPokaEl.value) || 0;
         var pokaQty = parseInt(pokaEl.value)    || 0;
         var openPcs = parseInt(openEl.value)    || 0;
-        totalEl.value = (perPoka * pokaQty) + openPcs;
+        var base    = perPoka * pokaQty;
+        totalEl.value = base + openPcs;
+        breakdownEl.textContent = (perPoka && pokaQty)
+            ? '(' + base.toLocaleString() + (openPcs > 0 ? ' + ' + openPcs.toLocaleString() + ' open pcs' : '') + ')'
+            : '';
         validateQuantityLimits();
     }
     perPokaEl.addEventListener('input', calcTotal);

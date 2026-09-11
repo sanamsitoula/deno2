@@ -745,10 +745,20 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
         </div>
         <div class="form-group">
             <label>Total Qty <small>(auto)</small>:</label>
+            <?php
+                $init_per_poka = (int)($edit_record['per_poka_qty'] ?? 0);
+                $init_poka_qty = (int)($edit_record['poka_qty'] ?? 0);
+                $init_open_pcs = (int)($edit_record['quantity_openpcs'] ?? 0);
+                $init_base     = $init_per_poka * $init_poka_qty;
+                $init_total    = $init_base + $init_open_pcs;
+            ?>
             <input type="text" id="total_qty_display" class="form-control" disabled
-                   value="<?= ($edit_record && $edit_record['per_poka_qty'] && $edit_record['poka_qty'])
-                              ? number_format($edit_record['per_poka_qty'] * $edit_record['poka_qty'])
-                              : '' ?>">
+                   value="<?= ($init_per_poka && $init_poka_qty) ? number_format($init_total) : '' ?>">
+            <small id="total_qty_breakdown" class="text-muted">
+                <?= ($init_per_poka && $init_poka_qty)
+                    ? '(' . number_format($init_base) . ($init_open_pcs > 0 ? ' + ' . number_format($init_open_pcs) . ' open pcs' : '') . ')'
+                    : '' ?>
+            </small>
         </div>
     </div>
 
@@ -1171,18 +1181,27 @@ document.addEventListener('DOMContentLoaded', function () {
     });
 
     /* ── TOTAL QTY + LIVE LIMIT VALIDATION ── */
-    var perPokaEl = document.getElementById('per_poka_qty');
-    var pokaEl    = document.getElementById('poka_qty');
-    var totalEl   = document.getElementById('total_qty_display');
+    var perPokaEl  = document.getElementById('per_poka_qty');
+    var pokaEl     = document.getElementById('poka_qty');
+    var openPcsEl  = document.getElementById('quantity_openpcs');
+    var totalEl    = document.getElementById('total_qty_display');
+    var breakdownEl = document.getElementById('total_qty_breakdown');
 
     function calcTotal() {
         var p = parseInt(perPokaEl.value, 10) || 0;
         var q = parseInt(pokaEl.value,    10) || 0;
-        totalEl.value = (p * q).toLocaleString();
+        var o = parseInt(openPcsEl.value, 10) || 0;
+        var base  = p * q;
+        var total = base + o;
+        totalEl.value = total.toLocaleString();
+        breakdownEl.textContent = (p && q)
+            ? '(' + base.toLocaleString() + (o > 0 ? ' + ' + o.toLocaleString() + ' open pcs' : '') + ')'
+            : '';
         validateQuantityLimits();
     }
     perPokaEl.addEventListener('input', calcTotal);
     pokaEl.addEventListener('input', calcTotal);
+    openPcsEl.addEventListener('input', calcTotal);
 
     function validateQuantityLimits() {
         var warningDiv = document.getElementById('quantity_warning');

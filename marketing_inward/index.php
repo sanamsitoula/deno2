@@ -111,7 +111,19 @@ $search_params = [
     'inward_no' => $_GET['inward_no'] ?? '',
     'status'    => $_GET['status'] ?? '',
     'goddam_id' => $_GET['goddam_id'] ?? '',
+    'd2m_id'    => $_GET['d2m_id'] ?? '',
 ];
+
+// D2M filter dropdown — only D2Ms that actually have a Marketing Inward
+// against them (filtering by an unrelated D2M would just return nothing),
+// with enough detail (no., type, date, item counts) to pick the right one.
+$d2m_filter_options = $conn->query("
+    SELECT DISTINCT d.id, d.d2m_no, d.d2m_type, d.nep_date, d.status,
+           (SELECT COUNT(*) FROM marketing_inward mi2 WHERE mi2.d2m_id = d.id AND mi2.status <> 'CANCELLED') AS mi_count
+    FROM d2m d
+    JOIN marketing_inward mi ON mi.d2m_id = d.id
+    ORDER BY d.nep_date DESC
+")->fetchAll(PDO::FETCH_ASSOC);
 
 $conditions = "";
 $bind_params = [];
@@ -126,6 +138,10 @@ if (!empty($search_params['status'])) {
 if (!empty($search_params['goddam_id'])) {
     $conditions .= " AND mi.goddam_id = :goddam_id";
     $bind_params[':goddam_id'] = $search_params['goddam_id'];
+}
+if (!empty($search_params['d2m_id'])) {
+    $conditions .= " AND mi.d2m_id = :d2m_id";
+    $bind_params[':d2m_id'] = $search_params['d2m_id'];
 }
 
 $count_stmt = $conn->prepare("SELECT COUNT(*) FROM marketing_inward mi WHERE 1=1 {$conditions}");
@@ -225,6 +241,16 @@ th { background:linear-gradient(135deg,#16a34a 0%,#059669 100%); color:#fff; tex
             <option value="">All</option>
             <?php foreach ($goddams as $g): ?>
               <option value="<?= $g['id'] ?>" <?= (string)$search_params['goddam_id']===(string)$g['id']?'selected':'' ?>><?= htmlspecialchars($g['code']) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </div>
+        <div class="search-group"><label>D2M</label>
+          <select name="d2m_id" class="search-control">
+            <option value="">All</option>
+            <?php foreach ($d2m_filter_options as $d): ?>
+              <option value="<?= $d['id'] ?>" <?= (string)$search_params['d2m_id']===(string)$d['id']?'selected':'' ?>>
+                <?= htmlspecialchars($d['d2m_no']) ?> — <?= htmlspecialchars($d['d2m_type']) ?> — <?= htmlspecialchars($d['nep_date']) ?> (<?= (int)$d['mi_count'] ?> inward<?= (int)$d['mi_count']!==1?'s':'' ?>)
+              </option>
             <?php endforeach; ?>
           </select>
         </div>
