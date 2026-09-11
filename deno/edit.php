@@ -423,8 +423,16 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
         <input type="hidden" name="action" value="update">
         <input type="hidden" name="id"     value="<?= $record['id'] ?>">
 
+        <?php
+            // Entries can now only be created/linked FROM an existing Book Packing
+            // record — Direct Entry and From Job Ticket are disabled going forward.
+            // A record that already used one of those legacy modes keeps its
+            // original options here so editing it doesn't break. Other logic same.
+            $legacy_mode = in_array($entry_type_val, ['direct', 'from_jt'], true);
+        ?>
         <!-- Entry type selector -->
         <div class="entry-type-selector">
+            <?php if ($legacy_mode): ?>
             <div class="entry-type-option">
                 <input type="radio" name="entry_type" id="type_direct" value="direct"
                        <?= $entry_type_val === 'direct' ? 'checked' : '' ?>>
@@ -443,9 +451,10 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
                     <div class="entry-type-desc">Link to existing JT</div>
                 </label>
             </div>
+            <?php endif; ?>
             <div class="entry-type-option">
                 <input type="radio" name="entry_type" id="type_from_bp" value="from_bp"
-                       <?= $entry_type_val === 'from_bp' ? 'checked' : '' ?>>
+                       <?= (!$legacy_mode) ? 'checked' : '' ?>>
                 <label for="type_from_bp">
                     <div class="entry-type-icon">📦</div>
                     <div class="entry-type-title">From Book Packing</div>
@@ -454,7 +463,8 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
             </div>
         </div>
 
-        <!-- Mode: Direct -->
+        <?php if ($legacy_mode): ?>
+        <!-- Mode: Direct (legacy record only — new entries no longer allow this) -->
         <div id="direct_mode" class="mode-panel">
             <div class="form-row">
                 <div class="form-group" style="flex:2;">
@@ -471,7 +481,7 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
             </div>
         </div>
 
-        <!-- Mode: From Job Ticket -->
+        <!-- Mode: From Job Ticket (legacy record only — new entries no longer allow this) -->
         <div id="jt_mode" class="mode-panel hidden">
             <div class="form-row">
                 <div class="form-group" style="flex:2;">
@@ -492,6 +502,24 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
                 </div>
             </div>
         </div>
+        <?php else: ?>
+        <!-- Direct Entry and From Job Ticket modes are disabled — entries can now
+             only be created/linked from an existing Book Packing record. Hidden
+             no-op elements kept only so the shared dropdown script has ids to bind. -->
+        <div id="direct_mode" class="mode-panel hidden">
+            <input type="text" id="book_search" style="display:none">
+            <input type="hidden" id="book_code">
+            <div class="dropdown-options" id="book_options" style="display:none"></div>
+        </div>
+        <div id="jt_mode" class="mode-panel hidden">
+            <input type="text" id="jt_search" style="display:none">
+            <input type="hidden" id="jt_id">
+            <div class="dropdown-options" id="jt_options" style="display:none"></div>
+            <div class="info-box hidden" id="jt_info_box">
+                <span id="jt_book_name"></span><span id="jt_lot"></span><span id="jt_print_qty"></span>
+            </div>
+        </div>
+        <?php endif; ?>
 
         <!-- Mode: From Book Packing -->
         <div id="bp_mode" class="mode-panel hidden">
@@ -500,7 +528,7 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
                     <label>📦 Book Packing:</label>
                     <div class="search-dropdown">
                         <input type="text" class="form-control dropdown-search" id="bp_search"
-                               placeholder="Type to search packing name, book, or JT code…" autocomplete="off"
+                               placeholder="Type to search packing name, book code, book name, or JT code…" autocomplete="off"
                                value="<?= htmlspecialchars($edit_bp_label) ?>">
                         <input type="hidden" name="bp_id" id="bp_id"
                                value="<?= htmlspecialchars($record['bp_id'] ?? '') ?>">
@@ -508,6 +536,8 @@ body { font-size:16px; font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; 
                     </div>
                     <div class="summary-box hidden" id="bp_summary_box">
                         <strong style="display:block;margin-bottom:10px;">📊 Production Summary</strong>
+                        <div class="summary-row"><span>Book Code:</span><strong id="bp_book_code">-</strong></div>
+                        <div class="summary-row"><span>Book Name:</span><strong id="bp_book_name">-</strong></div>
                         <div class="summary-row"><span>Job Ticket:</span><strong id="bp_jt_code">-</strong></div>
                         <div class="summary-row"><span>Total Print Qty:</span><strong id="bp_total_print">0</strong></div>
                         <div class="summary-row"><span>Total Packed (All BP):</span><strong id="bp_total_packed">0</strong></div>
@@ -801,6 +831,8 @@ document.addEventListener('DOMContentLoaded', function () {
         inputId: 'bp_search', hiddenId: 'bp_id', optionsId: 'bp_options', type: 'book_packing',
         onSelect: function (item) {
             bpSelectedJtId = item.jt_id || '';
+            document.getElementById('bp_book_code').textContent = item.book_code || '-';
+            document.getElementById('bp_book_name').textContent = item.book_name || '-';
             fetch('get_bp_summary.php?bp_id=' + encodeURIComponent(item.value) + '&jt_id=' + encodeURIComponent(bpSelectedJtId))
                 .then(function (r) { return r.json(); })
                 .then(function (data) {

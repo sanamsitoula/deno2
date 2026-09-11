@@ -145,6 +145,7 @@ $query = "
            fy.fiscal_name,
            jt.job_ticket_code,
            bp.name AS bp_name,
+           creator.username AS created_by_username,
            (
                SELECT COUNT(*) 
                FROM d2m_items di 
@@ -164,6 +165,7 @@ $query = "
     LEFT JOIN fiscal_years fy ON d.fiscal_year_id = fy.id
     LEFT JOIN job_ticket jt   ON d.jt_id = jt.id
     LEFT JOIN book_packing bp ON d.bp_id = bp.id
+    LEFT JOIN users creator   ON d.created_by = creator.id
     WHERE 1=1
 ";
 
@@ -300,7 +302,7 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
         echo "<td>" . number_format($record['total_qty']) . "</td>";
         echo "<td>" . number_format($record['quantity_openpcs']) . "</td>";
         echo "<td>" . htmlspecialchars($record['d2m_numbers'] ?? 'N/A') . "</td>";
-        echo "<td>" . htmlspecialchars($record['created_by']) . "</td>";
+        echo "<td>" . htmlspecialchars($record['created_by_username'] ?? '') . "</td>";
         echo "<td>" . date('Y-m-d H:i', strtotime($record['created_at'])) . "</td>";
         echo "</tr>";
     }
@@ -877,7 +879,7 @@ h2 {
                                 <span class="no-d2m">Not in D2M</span>
                             <?php endif; ?>
                         </td>
-                        <td><?= ucfirst(htmlspecialchars($record['created_by'])) ?></td>
+                        <td><?= htmlspecialchars($record['created_by_username'] ?? '-') ?></td>
                         <td><?= date('Y-m-d H:i', strtotime($record['created_at'])) ?></td>
                         <td>
                             <?php if (has_role('editor') || has_role('admin')): ?>
