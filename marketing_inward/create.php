@@ -12,9 +12,10 @@ $is_admin = has_role('admin');
 $error    = '';
 
 /* ===============================================================
-   D2M DROPDOWN — shows every D2M with outstanding lines, and how
-   much of it is already inwarded (plan §5a: pipeline visibility,
-   not filtered to this user's own eligible slice).
+   D2M DROPDOWN — shows every non-deleted D2M with outstanding lines
+   (any status — DRAFT/CHECKED included), and how much of it is
+   already inwarded (plan §5a: pipeline visibility, not filtered to
+   this user's own eligible slice).
 =============================================================== */
 $d2m_options = $conn->query("
     SELECT d.id, d.d2m_no, d.nep_date, d.d2m_type, d.status,
@@ -28,7 +29,7 @@ $d2m_options = $conn->query("
            ) AS inwarded_items
     FROM d2m d
     JOIN d2m_items di ON di.d2m_id = d.id
-    WHERE d.status IN ('VERIFIED','CLOSE','APPROVED') AND d.deleted_at IS NULL
+    WHERE d.deleted_at IS NULL
     GROUP BY d.id
     HAVING COUNT(di.id) > COUNT(di.id) FILTER (
                WHERE di.id IN (
@@ -293,6 +294,7 @@ $today_bs = str_replace('-', '.', DateConverter::todayBs());
             <?php foreach ($d2m_options as $d): $remaining = $d['total_items'] - $d['inwarded_items']; ?>
               <option value="<?= $d['id'] ?>" <?= $d2m_id === (int)$d['id'] ? 'selected' : '' ?>>
                 <?= htmlspecialchars($d['d2m_no']) ?> — <?= htmlspecialchars($d['d2m_type']) ?> —
+                <?= htmlspecialchars($d['status']) ?> —
                 <?= (int)$d['inwarded_items'] ?>/<?= (int)$d['total_items'] ?> inwarded (<?= $remaining ?> remaining)
               </option>
             <?php endforeach; ?>
@@ -323,9 +325,8 @@ $today_bs = str_replace('-', '.', DateConverter::todayBs());
       </div>
     <?php elseif (empty($d2m_options)): ?>
       <div class="no-items">
-        No D2M currently has outstanding lines to inward — either none are <?= $is_admin ? '' : 'yet' ?>
-        VERIFIED/CLOSE/APPROVED, or every VERIFIED D2M has already been fully received. Check
-        <a href="<?= getUrl('d2m/index.php') ?>">D2M records</a>.
+        No D2M currently has outstanding lines to inward — either none exist yet, or every one has
+        already been fully received. Check <a href="<?= getUrl('d2m/index.php') ?>">D2M records</a>.
       </div>
     <?php endif; ?>
 
