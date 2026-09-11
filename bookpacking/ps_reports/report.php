@@ -164,8 +164,8 @@ function exportToCSV() {
     csvContent += `"स्थिति: ${statusText}"\n\n`;
     
     // Add column headers in Nepali and English
-    csvContent += "सि.नं.,रेकर्ड नाम,जब टिकट,पुस्तकको नाम,कक्षा,प्रकार,पुस्तक कोड,प्याक मात्रा,जेटी प्रिन्ट मात्रा,मिति (नेपाली),मिति (अंग्रेजी),सुपरभाइजर,इन्चार्ज,अपरेटर,स्थिति,वित्तीय वर्ष,कैफियत\n";
-    csvContent += "SN,Record Name,Job Ticket,Book Name,Class,Type,Book Code,Packed Qty,JT Print Qty,Date Nep,Date Eng,Supervisor,Incharge,Operator,Status,Fiscal Year,Remarks\n";
+    csvContent += "सि.नं.,प्याकिङ नं.,रेकर्ड नाम,जब टिकट,पुस्तकको नाम,कक्षा,प्रकार,पुस्तक कोड,प्याक मात्रा,जेटी प्रिन्ट मात्रा,मिति (नेपाली),मिति (अंग्रेजी),सुपरभाइजर,इन्चार्ज,अपरेटर,स्थिति,वित्तीय वर्ष,कैफियत\n";
+    csvContent += "SN,Packing No,Record Name,Job Ticket,Book Name,Class,Type,Book Code,Packed Qty,JT Print Qty,Date Nep,Date Eng,Supervisor,Incharge,Operator,Status,Fiscal Year,Remarks\n";
     
     // Calculate totals
     var totalPackedQty = 0;
@@ -180,14 +180,14 @@ function exportToCSV() {
             var cellText = cell.textContent.trim();
             
             // Calculate totals for specific columns
-            if (cellIndex === 7) { // Packed Qty column
+            if (cellIndex === 8) { // Packed Qty column
                 totalPackedQty += parseInt(cellText.replace(/,/g, '')) || 0;
-            } else if (cellIndex === 8) { // JT Print Qty column
+            } else if (cellIndex === 9) { // JT Print Qty column
                 totalPrintQty += parseInt(cellText.replace(/,/g, '')) || 0;
             }
-            
+
             // Clean up cell text
-            if (cellIndex === 4) { // Type column
+            if (cellIndex === 6) { // Type column
                 cellText = cellText.replace(/\n/g, ' ').replace(/\s+/g, ' ').trim();
             }
             
@@ -201,7 +201,7 @@ function exportToCSV() {
     });
     
     // Add total row
-    csvContent += `"जम्मा (Total)","","","","","","","${totalPackedQty.toLocaleString()}","${totalPrintQty.toLocaleString()}","","","","","","","",""\n`;
+    csvContent += `"जम्मा (Total)","","","","","","","","${totalPackedQty.toLocaleString()}","${totalPrintQty.toLocaleString()}","","","","","","","",""\n`;
     
     // Create and download CSV file
     var blob = new Blob([csvContent], { 
@@ -792,6 +792,7 @@ document.addEventListener('DOMContentLoaded', function() {
         <thead>
             <tr>
                 <th>सि.नं.<br>(SN)</th>
+                <th>प्याकिङ नं.<br>(Packing No.)</th>
                 <th>रेकर्ड नाम<br>(Record Name)</th>
                 <th>जब टिकट<br>(Job Ticket)</th>
                 <th>पुस्तकको नाम<br>(Book Name)</th>
@@ -816,6 +817,7 @@ document.addEventListener('DOMContentLoaded', function() {
             foreach ($records as $record): ?>
             <tr>
                 <td><?= $sn++ ?></td>
+                <td><?= htmlspecialchars($record['packing_no'] ?? '-') ?></td>
                 <td><?= htmlspecialchars($record['name']) ?></td>
                 <td><?= htmlspecialchars($record['job_ticket_code']) ?></td>
                 <td><?= htmlspecialchars($record['book_name']) ?></td>

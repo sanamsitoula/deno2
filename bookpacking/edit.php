@@ -50,9 +50,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $p_qty = (int)$_POST['p_qty'];
         $jt_print_qty = (int)$_POST['jt_print_qty'];
 
-        if ($p_qty > $jt_print_qty) {
-            throw new Exception("Packed quantity cannot be greater than job ticket print quantity ({$jt_print_qty}).");
-        }
+        // Over-packing is allowed and saved — flagged via a warning message, not blocked.
+        $overpack_warning = ($p_qty > $jt_print_qty)
+            ? "Note: packed quantity ({$p_qty}) exceeds job ticket print quantity ({$jt_print_qty})."
+            : null;
 
         // Update packing record
         $update_sql = "
@@ -97,7 +98,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         ]);
 
         $conn->commit();
-        $_SESSION['success_message'] = "Packing record updated successfully!";
+        $_SESSION['success_message'] = "Packing record updated successfully!" . ($overpack_warning ? " ⚠ {$overpack_warning}" : "");
         header('Location: view.php?id=' . $packing_id);
         exit();
 
@@ -465,6 +466,12 @@ if ($packing['jt_id']) {
                         </div>
 
                         <div class="form-group">
+                            <label for="packing_no_display">Packing No.</label>
+                            <input type="text" id="packing_no_display" class="form-control"
+                                   value="<?= htmlspecialchars($packing['packing_no'] ?? '-') ?>" readonly>
+                        </div>
+
+                        <div class="form-group">
                             <label for="fiscal_year_id">Fiscal Year <span class="required">*</span></label>
                             <select id="fiscal_year_id" name="fiscal_year_id" class="form-control" required>
                                 <option value="">Select Fiscal Year</option>
@@ -498,7 +505,7 @@ if ($packing['jt_id']) {
                                             data-lot="<?= htmlspecialchars($jt['lot']) ?>"
                                             data-class="<?= htmlspecialchars($jt['class_level']) ?>"
                                         <?= (($_POST['jt_id'] ?? $packing['jt_id']) == $jt['id']) ? 'selected' : '' ?>>
-                                        <?= htmlspecialchars($jt['job_ticket_code']) ?> - <?= htmlspecialchars($jt['book_name']) ?> (Qty: <?= number_format($jt['print_qty']) ?>)
+                                        <?= htmlspecialchars($jt['job_ticket_code']) ?> - <?= htmlspecialchars($jt['book_code']) ?> - <?= htmlspecialchars($jt['book_name']) ?> (Qty: <?= number_format($jt['print_qty']) ?>)
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -559,7 +566,7 @@ if ($packing['jt_id']) {
                                    value="<?= htmlspecialchars($_POST['p_qty'] ?? $packing['p_qty']) ?>" required>
                             <div class="quantity-alert" id="quantityAlert">
                                 <i class="fas fa-exclamation-triangle"></i>
-                                Packed quantity cannot exceed job ticket print quantity!
+                                Packed quantity exceeds job ticket print quantity — it will still be saved.
                             </div>
                         </div>
                     </div>
@@ -574,14 +581,15 @@ if ($packing['jt_id']) {
                     <div class="form-row">
                         <div class="form-group">
                             <label for="date_nep">Nepali Date <span class="required">*</span></label>
-                            <input type="text" id="date_nep" name="date_nep" class="form-control"
-                                   placeholder="2081.01.01" pattern="[0-9]{4}\.[0-9]{2}\.[0-9]{2}"
-                                   value="<?= htmlspecialchars($_POST['date_nep'] ?? $packing['date_nep']) ?>" required>
+                            <input type="text" id="date_nep" name="date_nep" class="form-control bs-date"
+                                   data-ad-pair="date_eng"
+                                   placeholder="2081.01.01 (click to open calendar)" pattern="[0-9]{4}\.[0-9]{2}\.[0-9]{2}"
+                                   value="<?= htmlspecialchars($_POST['date_nep'] ?? $packing['date_nep']) ?>" autocomplete="off" required>
                         </div>
 
                         <div class="form-group">
                             <label for="date_eng">English Date <span class="required">*</span></label>
-                            <input type="date" id="date_eng" name="date_eng" class="form-control"
+                            <input type="date" id="date_eng" name="date_eng" class="form-control ad-date"
                                    value="<?= htmlspecialchars($_POST['date_eng'] ?? $packing['date_eng']) ?>" required>
                         </div>
                     </div>
@@ -783,14 +791,15 @@ document.addEventListener('DOMContentLoaded', function() {
         validateQuantities();
     });
 
-    // Validate packed quantity
+    // Flag (but don't block) packed quantity exceeding job ticket print quantity
     function validateQuantities() {
         const printQty = parseInt(jtPrintQtyInput.value) || 0;
         const packQty = parseInt(pQtyInput.value) || 0;
 
         if (packQty > printQty && printQty > 0) {
             quantityAlert.classList.add('show');
-            pQtyInput.style.borderColor = '#dc3545';
+            quantityAlert.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Packed quantity exceeds job ticket print quantity — it will still be saved, but please confirm this is intentional.';
+            pQtyInput.style.borderColor = '#ffc107';
         } else {
             quantityAlert.classList.remove('show');
             pQtyInput.style.borderColor = '#e9ecef';
@@ -808,18 +817,9 @@ document.addEventListener('DOMContentLoaded', function() {
         this.value = value.substring(0, 10);
     });
 
-    // Form submit validation
+    // Over-packing is allowed and saved — the warning above stays visible
+    // but no longer blocks submission.
     form.addEventListener('submit', function(e) {
-        const printQty = parseInt(jtPrintQtyInput.value) || 0;
-        const packQty = parseInt(pQtyInput.value) || 0;
-
-        if (packQty > printQty) {
-            e.preventDefault();
-            alert('❌ Packed quantity cannot exceed job ticket print quantity of ' + printQty + '!');
-            pQtyInput.focus();
-            return false;
-        }
-
         const submitBtn = form.querySelector('button[type="submit"]');
         const originalText = submitBtn.innerHTML;
         submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';

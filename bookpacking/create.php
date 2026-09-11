@@ -38,9 +38,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $stmt->execute([':jt_id' => $jt_id]);
         $total_packed = (int)$stmt->fetch()['total_packed'];
 
-        // Validate: new p_qty + total_packed <= jt_print_qty
+        // Over-packing (new p_qty + total_packed > jt_print_qty) is allowed and saved —
+        // flagged to the user via a warning banner rather than blocked.
+        $overpack_warning = null;
         if ($p_qty + $total_packed > $jt_print_qty) {
-            throw new Exception("Total packed quantity ({$total_packed} + {$p_qty}) exceeds print quantity ({$jt_print_qty}).");
+            $overpack_warning = "Note: total packed quantity ({$total_packed} + {$p_qty} = " . ($total_packed + $p_qty) . ") exceeds job ticket print quantity ({$jt_print_qty}).";
         }
 
         // Fiscal-year-scoped packing number: "{serial}/BP/{fiscalShort}" — resets
@@ -102,7 +104,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
         $conn->commit();
 
-        $_SESSION['success_message'] = "Packing record created successfully!";
+        $_SESSION['success_message'] = "Packing record created successfully!" . ($overpack_warning ? " ⚠ {$overpack_warning}" : "");
         header('Location: view.php?id=' . $packing_id);
         exit();
 
@@ -256,7 +258,7 @@ $operators = $conn->query("SELECT id, username FROM users WHERE role IN ('operat
                                             data-book-name="<?= htmlspecialchars($jt['book_name']) ?>"
                                             data-lot="<?= htmlspecialchars($jt['lot']) ?>"
                                             data-class="<?= htmlspecialchars($jt['class_level']) ?>">
-                                        <?= htmlspecialchars($jt['job_ticket_code']) ?> - <?= htmlspecialchars($jt['book_name']) ?> (Qty: <?= number_format($jt['print_qty']) ?>)
+                                        <?= htmlspecialchars($jt['job_ticket_code']) ?> - <?= htmlspecialchars($jt['book_code']) ?> - <?= htmlspecialchars($jt['book_name']) ?> (Qty: <?= number_format($jt['print_qty']) ?>)
                                     </option>
                                 <?php endforeach; ?>
                             </select>
@@ -373,14 +375,15 @@ $operators = $conn->query("SELECT id, username FROM users WHERE role IN ('operat
                     <div class="form-row">
                         <div class="form-group">
                             <label for="date_nep">Nepali Date <span class="required">*</span></label>
-                            <input type="text" id="date_nep" name="date_nep" class="form-control" 
-                                   placeholder="2081.01.01" pattern="[0-9]{4}\.[0-9]{2}\.[0-9]{2}"
-                                   value="<?= htmlspecialchars($_POST['date_nep'] ?? date('Y.m.d', strtotime('+57 years'))) ?>" required>
+                            <input type="text" id="date_nep" name="date_nep" class="form-control bs-date"
+                                   data-ad-pair="date_eng"
+                                   placeholder="2081.01.01 (click to open calendar)" pattern="[0-9]{4}\.[0-9]{2}\.[0-9]{2}"
+                                   value="<?= htmlspecialchars($_POST['date_nep'] ?? date('Y.m.d', strtotime('+57 years'))) ?>" autocomplete="off" required>
                         </div>
-                        
+
                         <div class="form-group">
                             <label for="date_eng">English Date <span class="required">*</span></label>
-                            <input type="date" id="date_eng" name="date_eng" class="form-control" 
+                            <input type="date" id="date_eng" name="date_eng" class="form-control ad-date"
                                    value="<?= htmlspecialchars($_POST['date_eng'] ?? date('Y-m-d')) ?>" required>
                         </div>
                     </div>
@@ -550,11 +553,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 maxAllowedEl.textContent = new Intl.NumberFormat().format(printQty);
 
                 pQtyInput.value = Math.max(remaining, 0);
-                pQtyInput.disabled = remaining <= 0;
-
-                if (remaining <= 0) {
-                    alert("This job ticket is fully packed.");
-                }
 
                 prevContainer.style.display = 'block';
                 validateQuantities();
@@ -578,9 +576,10 @@ document.addEventListener('DOMContentLoaded', function () {
         const totalPacked = parseInt(totalPackedEl.textContent.replace(/,/g, '')) || 0;
         const remaining = printQty - totalPacked;
 
-        if (packQty > remaining && remaining > 0) {
+        if (packQty > remaining) {
             quantityAlert.classList.add('show');
-            pQtyInput.style.borderColor = '#dc3545';
+            quantityAlert.innerHTML = '<i class="fas fa-exclamation-triangle"></i> Packed quantity exceeds remaining capacity — it will still be saved, but please confirm this is intentional.';
+            pQtyInput.style.borderColor = '#ffc107';
         } else {
             quantityAlert.classList.remove('show');
             pQtyInput.style.borderColor = '#e9ecef';
@@ -589,17 +588,8 @@ document.addEventListener('DOMContentLoaded', function () {
 
     pQtyInput.addEventListener('input', validateQuantities);
 
-    // Form submit validation
-    document.getElementById('packingForm').addEventListener('submit', function (e) {
-        const printQty = parseInt(jtPrintQtyInput.value) || 0;
-        const packQty = parseInt(pQtyInput.value) || 0;
-        const totalPacked = parseInt(totalPackedEl.textContent.replace(/,/g, '')) || 0;
-        if (packQty + totalPacked > printQty) {
-            e.preventDefault();
-            alert(`Total packed quantity cannot exceed ${printQty}.`);
-            pQtyInput.focus();
-        }
-    });
+    // Over-packing is allowed and saved — the warning above stays visible
+    // but no longer blocks submission.
 });
 </script>
 
