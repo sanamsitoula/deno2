@@ -69,7 +69,16 @@ if ($d2m_id && $goddam_id) {
     $stmt->execute([':id' => $d2m_id]);
     $d2m_row = $stmt->fetch(PDO::FETCH_ASSOC);
 
-    if ($d2m_row) {
+    // Hard gate, on top of the goddam dropdown already only listing a
+    // non-admin's own goddams: if someone crafts the URL directly with a
+    // goddam_id they aren't an assigned handler for, say so plainly instead
+    // of silently falling through to a generic "no eligible items" message.
+    $goddam_not_assigned = false;
+    if (!$is_admin && !in_array($goddam_id, array_column($goddam_options, 'id'), false)) {
+        $goddam_not_assigned = true;
+    }
+
+    if ($d2m_row && !$goddam_not_assigned) {
         $sql = "
             SELECT di.id AS d2m_item_id, di.book_code, di.total_qty AS press_qty,
                    di.associated_deno_ids, b.book_name, b.class_level, b.is_translated
@@ -104,6 +113,29 @@ if ($d2m_id && $goddam_id) {
         }
         $stmt->execute($params);
         $eligible_items = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+}
+
+// Preview-only next serial/inward number — same numbering rule used at
+// submit time (generateFiscalScopedNumber), just read ahead of time so the
+// handler can see it before committing. Not reserved; a concurrent submit
+// could still take this exact number first, which is fine — the real one
+// is (re)computed transactionally on POST.
+$preview_inward_no = null;
+if ($d2m_id && $goddam_id && !empty($goddam_options)) {
+    $fy_preview = getActiveFiscalYear($conn);
+    $goddam_code_preview = null;
+    foreach ($goddam_options as $g) { if ((int)$g['id'] === $goddam_id) { $goddam_code_preview = $g['code']; break; } }
+    if (!$goddam_code_preview && $is_admin) {
+        $gStmt = $conn->prepare("SELECT code FROM goddam WHERE id = :id");
+        $gStmt->execute([':id' => $goddam_id]);
+        $goddam_code_preview = $gStmt->fetchColumn();
+    }
+    if ($fy_preview && $goddam_code_preview) {
+        $serialStmt = $conn->prepare("SELECT COALESCE(MAX(serial_no),0)+1 FROM marketing_inward WHERE fiscal_year_id = :fy AND goddam_id = :gid");
+        $serialStmt->execute([':fy' => $fy_preview['id'], ':gid' => $goddam_id]);
+        $next_serial = (int)$serialStmt->fetchColumn();
+        $preview_inward_no = "{$next_serial}/MI-{$goddam_code_preview}/" . getFiscalShort($fy_preview);
     }
 }
 
@@ -276,6 +308,7 @@ $today_bs = str_replace('-', '.', DateConverter::todayBs());
 .item-table input[type=number] { width:100px; padding:6px 8px; border:1px solid #d1d5db; border-radius:5px; }
 .d2m-opt-remaining { color:#b45309; font-weight:600; }
 .no-items { text-align:center; color:#9ca3af; padding:30px 0; }
+.serial-preview { font-weight:700; color:#4338ca; background:#eef2ff; }
 </style>
 
 <div class="mi-wrap">
@@ -330,7 +363,10 @@ $today_bs = str_replace('-', '.', DateConverter::todayBs());
       </div>
     <?php endif; ?>
 
-    <?php if ($d2m_id && $goddam_id && $d2m_row): ?>
+    <?php if ($d2m_id && $goddam_id && $goddam_not_assigned): ?>
+      <div class="no-items">⛔ You are not an assigned handler for this goddam — only a user with an active
+        <a href="<?= getUrl('goddam/handlers.php') ?>">Goddam Handler Assignment</a> for it can inward here.</div>
+    <?php elseif ($d2m_id && $goddam_id && $d2m_row): ?>
       <?php if (empty($eligible_items)): ?>
         <div class="no-items">No eligible items for you on this D2M — either everything is already inwarded, or you don't have a class/type/date-window assignment (via Goddam → Handler Assignments) that covers this D2M's remaining lines.</div>
       <?php else: ?>
@@ -342,27 +378,35 @@ $today_bs = str_replace('-', '.', DateConverter::todayBs());
             <div class="form-group">
               <label>Nepali Date</label>
               <div class="dual-date">
-                <input class="bs-date" name="nep_date" value="<?= htmlspecialchars($today_bs) ?>" data-ad-pair="mi_eng_date" required>
-                <input class="ad-date" name="eng_date" id="mi_eng_date" type="date" required>
+                <input class="bs-date" name="nep_date" id="mi_nep_date" value="<?= htmlspecialchars($today_bs) ?>" data-ad-pair="mi_eng_date" required>
+                <input class="ad-date" name="eng_date" id="mi_eng_date" type="date" data-bs-pair="mi_nep_date" required>
               </div>
             </div>
             <div class="form-group">
               <label for="mi_remarks">Remarks</label>
               <input type="text" id="mi_remarks" name="remarks" placeholder="Optional">
             </div>
+            <?php if ($preview_inward_no): ?>
+            <div class="form-group">
+              <label>Inward No <span style="text-transform:none;font-weight:400;">(preview — assigned on submit)</span></label>
+              <input type="text" class="serial-preview" value="<?= htmlspecialchars($preview_inward_no) ?>" disabled>
+            </div>
+            <?php endif; ?>
           </div>
 
           <table class="item-table">
             <thead>
               <tr>
                 <th style="width:30px;"><input type="checkbox" id="checkAll" checked></th>
+                <th style="width:35px;">S.N.</th>
                 <th>Book</th><th>Code</th><th>Class</th><th>Type</th><th>Press Qty</th><th>Marketing Qty</th>
               </tr>
             </thead>
             <tbody>
-              <?php foreach ($eligible_items as $it): ?>
+              <?php $sn = 1; foreach ($eligible_items as $it): ?>
               <tr>
                 <td><input type="checkbox" class="item-check" data-item="<?= $it['d2m_item_id'] ?>" checked></td>
+                <td><?= $sn++ ?></td>
                 <td><?= htmlspecialchars($it['book_name']) ?></td>
                 <td><?= htmlspecialchars($it['book_code']) ?></td>
                 <td><?= htmlspecialchars($it['class_level']) ?></td>
@@ -387,6 +431,41 @@ $today_bs = str_replace('-', '.', DateConverter::todayBs());
 </div>
 
 <script>
+/**
+ * Explicit BS->AD wiring for the Nepali Date field — the shared
+ * bs-datepicker-global.js only auto-fills the paired English date when a
+ * date is picked from the calendar POPUP; typing it and tabbing away
+ * did not trigger it. This covers manual typing too (same fix as
+ * goddam/handlers.php).
+ */
+(function () {
+    var bs = document.getElementById('mi_nep_date');
+    var ad = document.getElementById('mi_eng_date');
+    if (!bs || !ad) return;
+
+    function fillAdFromBs() {
+        var v = bs.value.trim();
+        if (!v) return;
+        try {
+            var adVal = NepaliFunctions.BS2AD(v, 'YYYY.MM.DD', 'YYYY.MM.DD');
+            if (adVal) ad.value = adVal.replace(/\./g, '-');
+        } catch (e) { /* incomplete/invalid BS date — leave as-is */ }
+    }
+    function fillBsFromAd() {
+        var v = ad.value.trim();
+        if (!v) return;
+        try {
+            var bsVal = NepaliFunctions.AD2BS(v.replace(/-/g, '.'), 'YYYY.MM.DD', 'YYYY.MM.DD');
+            if (bsVal) bs.value = bsVal;
+        } catch (e) { /* invalid AD date — leave as-is */ }
+    }
+
+    bs.addEventListener('blur', fillAdFromBs);
+    bs.addEventListener('change', fillAdFromBs);
+    ad.addEventListener('change', fillBsFromAd);
+    if (bs.value) fillAdFromBs(); // pre-filled with today's BS date on load
+})();
+
 document.getElementById('checkAll')?.addEventListener('change', function() {
     document.querySelectorAll('.item-check').forEach(cb => cb.checked = this.checked);
 });
