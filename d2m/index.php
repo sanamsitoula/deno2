@@ -48,9 +48,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
         } elseif ($action === 'close') {
             // Update to CLOSE status
             $stmt = $conn->prepare("
-                UPDATE d2m 
+                UPDATE d2m
                 SET status = 'CLOSE'
-                WHERE id = :id AND status = 'VERIFIED'
+                WHERE id = :id AND status IN ('VERIFIED', 'APPROVED')
             ");
             $stmt->execute([':id' => $d2m_id]);
             $success_message = "D2M marked as CLOSED!";
@@ -418,6 +418,7 @@ h2 {
 .status-draft { background-color: #f8d7da; color: #721c24; }
 .status-checked { background-color: #fff3cd; color: #856404; }
 .status-verified { background-color: #d4edda; color: #155724; }
+.status-approved { background-color: #cfe2ff; color: #084298; }
 .status-cancelled { background-color: #d6d8db; color: #383d41; }
 .status-close { background-color: #d1ecf1; color: #0c5460; }
 
@@ -659,6 +660,7 @@ h2 {
                         <option value="DRAFT" <?= $search_params['status'] === 'DRAFT' ? 'selected' : '' ?>>Draft</option>
                         <option value="CHECKED" <?= $search_params['status'] === 'CHECKED' ? 'selected' : '' ?>>Checked</option>
                         <option value="VERIFIED" <?= $search_params['status'] === 'VERIFIED' ? 'selected' : '' ?>>Verified</option>
+                        <option value="APPROVED" <?= $search_params['status'] === 'APPROVED' ? 'selected' : '' ?>>Approved</option>
                         <option value="CANCELLED" <?= $search_params['status'] === 'CANCELLED' ? 'selected' : '' ?>>Cancelled</option>
                         <option value="CLOSE" <?= $search_params['status'] === 'CLOSE' ? 'selected' : '' ?>>Closed</option>
                     </select>
@@ -811,7 +813,7 @@ h2 {
         
         <!-- CLOSE and CANCEL actions (admin only) -->
         <?php if (has_role('admin')): ?>
-            <?php if ($record['status'] == 'VERIFIED'): ?>
+            <?php if (in_array($record['status'], ['VERIFIED', 'APPROVED'], true)): ?>
                 <form method="post" style="display: inline;">
                     <input type="hidden" name="action" value="close">
                     <input type="hidden" name="d2m_id" value="<?= $record['id'] ?>">

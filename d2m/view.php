@@ -12,16 +12,18 @@ if (!$d2m_id) {
 
 // Fetch D2M record with related data
 $stmt = $conn->prepare("
-    SELECT d.*, 
+    SELECT d.*,
            fy.fiscal_name as fiscal_year_name,
            u_created.username as created_by_name,
            u_checked.username as checked_by_name,
-           u_verified.username as verified_by_name
-    FROM d2m d 
+           u_verified.username as verified_by_name,
+           u_approved.username as approved_by_name
+    FROM d2m d
     LEFT JOIN fiscal_years fy ON d.fiscal_year_id = fy.id
     LEFT JOIN users u_created ON d.created_by = u_created.id
     LEFT JOIN users u_checked ON d.checked_by = u_checked.id
     LEFT JOIN users u_verified ON d.verified_by = u_verified.id
+    LEFT JOIN users u_approved ON d.approved_by = u_approved.id
     WHERE d.id = :id AND d.deleted_at IS NULL
 ");
 $stmt->execute([':id' => $d2m_id]);
@@ -110,6 +112,7 @@ $net_production = $total_qty + $total_open_pcs;
 .status-draft { background: #f8d7da; color: #721c24; }
 .status-checked { background: #fff3cd; color: #856404; }
 .status-verified { background: #d4edda; color: #155724; }
+.status-approved { background: #cfe2ff; color: #084298; }
 .status-cancelled { background: #d6d8db; color: #383d41; }
 .status-close { background: #d1ecf1; color: #0c5460; }
 
@@ -539,6 +542,20 @@ $net_production = $total_qty + $total_open_pcs;
                     <div class="timeline-meta">
                         By: <strong><?= htmlspecialchars($d2m['verified_by_name']) ?></strong><br>
                         On: <?= $d2m['verified_at'] ? date('F d, Y g:i A', strtotime($d2m['verified_at'])) : 'N/A' ?>
+                    </div>
+                </div>
+            </div>
+            <?php endif; ?>
+
+            <?php if ($d2m['approved_by_name']): ?>
+            <div class="timeline-item">
+                <div class="timeline-icon" style="background: #0d6efd;">✓</div>
+                <div class="timeline-content" style="border-left-color: #0d6efd;">
+                    <div class="timeline-title">Approved (auto)</div>
+                    <div class="timeline-meta">
+                        Completed via Marketing Inward — every line of this D2M has been received and approved.<br>
+                        By: <strong><?= htmlspecialchars($d2m['approved_by_name']) ?></strong><br>
+                        On: <?= $d2m['approved_at'] ? date('F d, Y g:i A', strtotime($d2m['approved_at'])) : 'N/A' ?>
                     </div>
                 </div>
             </div>

@@ -16,6 +16,8 @@ class Auth
         'production' => ['admin', 'production_manager'],
         'jobticket'  => ['admin', 'production_manager', 'supervisor'],
         'reports'    => ['admin', 'hr', 'finance', 'production_manager'],
+        'goddam'           => ['admin'],
+        'marketing_inward' => ['admin', 'marketing'],
         'admin'      => ['admin'],
     ];
 

@@ -107,6 +107,8 @@ function getUrl($path = '') {
         <a class="dropdown-item" href="<?= getUrl('forma/index.php') ?>">Forma</a>
         <a class="dropdown-item" href="<?= getUrl('bookpacking/index.php') ?>">Pack &amp; Stitch</a>
         <a class="dropdown-item" href="<?= getUrl('formaprinting/index.php') ?>">Forma Printing</a>
+        <a class="dropdown-item" href="<?= getUrl('goddam/index.php') ?>">Goddam</a>
+        <a class="dropdown-item" href="<?= getUrl('marketing_inward/index.php') ?>">Marketing Inward</a>
     </div>
 </li>
 <li class="nav-item">
@@ -142,6 +144,11 @@ function getUrl($path = '') {
         <a class="dropdown-item" href="<?= getUrl('d2mreports/daily.php') ?>">D2M Daily</a>
         <a class="dropdown-item" href="<?= getUrl('d2mreports/monthly.php') ?>">D2M Monthly</a>
         <a class="dropdown-item" href="<?= getUrl('d2mreports/yearly.php') ?>">D2M Yearly</a>
+        <a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/daily.php') ?>">Marketing Inward Daily</a>
+        <a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/monthly.php') ?>">Marketing Inward Monthly</a>
+        <a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/yearly.php') ?>">Marketing Inward Yearly</a>
+        <a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/book_pipeline.php') ?>">Book Pipeline</a>
+        <a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/jobticket_flow.php') ?>">Job Ticket Flow</a>
         <a class="dropdown-item" href="<?= getUrl('report/index.php') ?>">Compare Marketing</a>
         <a class="dropdown-item" href="<?= getUrl('attendance_device/attendance_report.php') ?>">Attendance PDF</a>
     </div>
@@ -170,6 +177,8 @@ function getUrl($path = '') {
         <li><a class="dropdown-item" href="<?= getUrl('forma/index.php') ?>">Forma</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('bookpacking/index.php') ?>">Pack &amp; Stitch</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('formaprinting/index.php') ?>">Forma Printing</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('goddam/index.php') ?>">Goddam</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('marketing_inward/index.php') ?>">Marketing Inward</a></li>
     </ul>
 </li>
 
@@ -234,6 +243,11 @@ function getUrl($path = '') {
         <li><a class="dropdown-item" href="<?= getUrl('d2mreports/daily.php') ?>">D2M Daily</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('d2mreports/monthly.php') ?>">D2M Monthly</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('d2mreports/yearly.php') ?>">D2M Yearly</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/daily.php') ?>">Marketing Inward Daily</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/monthly.php') ?>">Marketing Inward Monthly</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/yearly.php') ?>">Marketing Inward Yearly</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/book_pipeline.php') ?>">Book Pipeline</a></li>
+        <li><a class="dropdown-item" href="<?= getUrl('marketing_inward_reports/jobticket_flow.php') ?>">Job Ticket Flow</a></li>
         <li><a class="dropdown-item" href="<?= getUrl('report/index.php') ?>">Compare Marketing</a></li>
         <li><hr class="dropdown-divider"></li>
         <li><a class="dropdown-item" href="<?= getUrl('attendance_device/attendance_report.php') ?>"><i class="bi bi-file-pdf me-1"></i>Attendance PDF</a></li>
