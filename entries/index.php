@@ -9,6 +9,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     try {
         // Check if DENO is used in any D2M
+
         $checkStmt = $conn->prepare("
             SELECT COUNT(*) as count, 
                    string_agg(DISTINCT d.d2m_no, ', ') as d2m_numbers
@@ -584,7 +585,7 @@ h2 {
     <?php endif; ?>
 
     <div class="action-buttons">
-        <?php if (has_role('editor') || has_role('admin')): ?>
+        <?php if (has_role('editor') || has_role('admin') || has_role('operator') ): ?>
             <a href="deno.php" class="btn btn-primary btn-lg shadow-sm">
                 <i class="fas fa-plus-circle me-2"></i>Create New Deno
             </a>

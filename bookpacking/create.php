@@ -2,7 +2,10 @@
 ob_start();
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/database.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/config/functions.php';
+require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/vendor/autoload.php';
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
+
+use Administrator\Deno2\Shared\DateConverter;
 
 // Check permissions
 if (!has_role('incharge') && !has_role('operator') && !has_role('supervisor') && !has_role('admin')) {
@@ -378,7 +381,7 @@ $operators = $conn->query("SELECT id, username FROM users WHERE role IN ('operat
                             <input type="text" id="date_nep" name="date_nep" class="form-control bs-date"
                                    data-ad-pair="date_eng"
                                    placeholder="2081.01.01 (click to open calendar)" pattern="[0-9]{4}\.[0-9]{2}\.[0-9]{2}"
-                                   value="<?= htmlspecialchars($_POST['date_nep'] ?? date('Y.m.d', strtotime('+57 years'))) ?>" autocomplete="off" required>
+                                   value="<?= htmlspecialchars($_POST['date_nep'] ?? str_replace('-', '.', DateConverter::todayBs())) ?>" autocomplete="off" required>
                         </div>
 
                         <div class="form-group">

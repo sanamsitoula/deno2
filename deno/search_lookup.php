@@ -87,6 +87,7 @@ try {
                 LEFT JOIN job_ticket jt ON bp.jt_id = jt.id
                 WHERE  bp.status = true
                   AND  (:q = '' OR bp.name ILIKE :like
+                                 OR bp.book_code ILIKE :like
                                  OR b.book_name ILIKE :like
                                  OR jt.job_ticket_code ILIKE :like)
                 ORDER  BY bp.created_date DESC
@@ -96,8 +97,8 @@ try {
             foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
                 $results[] = [
                     'value'           => $row['id'],
-                    'label'           => $row['name'] . ' — ' . ($row['book_name'] ?? ''),
-                    'sublabel'        => 'JT: ' . ($row['job_ticket_code'] ?? '-') . ' · Packed: ' . number_format((int)$row['p_qty']),
+                    'label'           => $row['name'] . ' — ' . ($row['book_name'] ?? '') . ' (' . $row['book_code'] . ')',
+                    'sublabel'        => 'Code: ' . $row['book_code'] . ' · JT: ' . ($row['job_ticket_code'] ?? '-') . ' · Packed: ' . number_format((int)$row['p_qty']),
                     'book_code'       => $row['book_code'],
                     'book_name'       => $row['book_name'],
                     'jt_id'           => $row['jt_id'],
