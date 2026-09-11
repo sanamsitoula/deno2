@@ -328,15 +328,15 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
         <div class="form-group">
           <label>Active From</label>
           <div class="dual-date">
-            <input class="bs-date" name="active_from_nep" placeholder="2082.01.01" data-ad-pair="add_from_eng" required>
-            <input class="ad-date" name="active_from_eng" id="add_from_eng" type="date" data-bs-pair="">
+            <input class="bs-date" name="active_from_nep" id="add_from_nep" placeholder="2082.01.01" data-ad-pair="add_from_eng" required>
+            <input class="ad-date" name="active_from_eng" id="add_from_eng" type="date" data-bs-pair="add_from_nep">
           </div>
         </div>
         <div class="form-group">
           <label>Active To <span style="text-transform:none;font-weight:400;">(blank = open-ended)</span></label>
           <div class="dual-date">
-            <input class="bs-date" name="active_to_nep" placeholder="optional" data-ad-pair="add_to_eng">
-            <input class="ad-date" name="active_to_eng" id="add_to_eng" type="date">
+            <input class="bs-date" name="active_to_nep" id="add_to_nep" placeholder="optional" data-ad-pair="add_to_eng">
+            <input class="ad-date" name="active_to_eng" id="add_to_eng" type="date" data-bs-pair="add_to_nep">
           </div>
         </div>
         <div class="form-group">
@@ -453,14 +453,14 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
           <label>Active From</label>
           <div class="dual-date">
             <input class="bs-date" name="active_from_nep" id="edit_from_nep" data-ad-pair="edit_from_eng" required>
-            <input class="ad-date" name="active_from_eng" id="edit_from_eng" type="date">
+            <input class="ad-date" name="active_from_eng" id="edit_from_eng" type="date" data-bs-pair="edit_from_nep">
           </div>
         </div>
         <div class="form-group">
           <label>Active To</label>
           <div class="dual-date">
             <input class="bs-date" name="active_to_nep" id="edit_to_nep" data-ad-pair="edit_to_eng">
-            <input class="ad-date" name="active_to_eng" id="edit_to_eng" type="date">
+            <input class="ad-date" name="active_to_eng" id="edit_to_eng" type="date" data-bs-pair="edit_to_nep">
           </div>
         </div>
         <div class="field-note">Leave "Active To" blank to keep this assignment open-ended.</div>
@@ -474,6 +474,49 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 </div>
 
 <script>
+/**
+ * Explicit BS↔AD wiring for the Active From/To fields — the shared
+ * bs-datepicker-global.js only auto-fills the paired date when a date is
+ * picked from the calendar POPUP; typing the Nepali date by hand and
+ * tabbing/clicking away did not trigger it. These listeners cover manual
+ * typing too, using the same NepaliFunctions library already loaded
+ * globally (same approach as d2m/create.php).
+ */
+function wireDualDate(bsId, adId) {
+    var bs = document.getElementById(bsId);
+    var ad = document.getElementById(adId);
+    if (!bs || !ad) return;
+
+    function fillAdFromBs() {
+        var v = bs.value.trim();
+        if (!v) return;
+        try {
+            var adVal = NepaliFunctions.BS2AD(v, 'YYYY.MM.DD', 'YYYY.MM.DD');
+            if (adVal) ad.value = adVal.replace(/\./g, '-');
+        } catch (e) { /* incomplete/invalid BS date — leave as-is */ }
+    }
+    function fillBsFromAd() {
+        var v = ad.value.trim();
+        if (!v) return;
+        try {
+            var bsVal = NepaliFunctions.AD2BS(v.replace(/-/g, '.'), 'YYYY.MM.DD', 'YYYY.MM.DD');
+            if (bsVal) bs.value = bsVal;
+        } catch (e) { /* invalid AD date — leave as-is */ }
+    }
+
+    bs.addEventListener('blur', fillAdFromBs);
+    bs.addEventListener('change', fillAdFromBs);
+    ad.addEventListener('change', fillBsFromAd);
+    if (bs.value) fillAdFromBs();
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    wireDualDate('add_from_nep', 'add_from_eng');
+    wireDualDate('add_to_nep', 'add_to_eng');
+    wireDualDate('edit_from_nep', 'edit_from_eng');
+    wireDualDate('edit_to_nep', 'edit_to_eng');
+});
+
 document.getElementById('add_class_all')?.addEventListener('change', function() {
     document.querySelectorAll('.add-class-cb').forEach(cb => cb.checked = this.checked);
 });
