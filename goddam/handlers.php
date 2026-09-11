@@ -174,6 +174,35 @@ if ($goddam_filter > 0) $stmt->bindValue(':gid', $goddam_filter, PDO::PARAM_INT)
 $stmt->execute();
 $handlers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
+// Per-row effective status: is_active is a manual kill-switch, independent
+// of whether today actually falls inside the active_from/active_to window —
+// both are shown so admin can tell "disabled" apart from "just not in range".
+$today = date('Y-m-d');
+function handlerEffectiveStatus(array $h, string $today): array {
+    if (!$h['is_active']) return ['label' => 'Disabled', 'class' => 'disabled'];
+    if ($h['active_from_eng'] > $today) return ['label' => 'Upcoming', 'class' => 'upcoming'];
+    if ($h['active_to_eng'] && $h['active_to_eng'] < $today) return ['label' => 'Expired', 'class' => 'expired'];
+    return ['label' => 'Active now', 'class' => 'live'];
+}
+
+// Group by (goddam, user, date window) so a bulk-added handler with many
+// classes/types renders as one compact card instead of one row per
+// class x type combination.
+$groups = [];
+foreach ($handlers as $h) {
+    $key = $h['goddam_id'] . '|' . $h['user_id'] . '|' . $h['active_from_eng'] . '|' . ($h['active_to_eng'] ?? '');
+    if (!isset($groups[$key])) {
+        $groups[$key] = [
+            'goddam_code' => $h['goddam_code'], 'goddam_name' => $h['goddam_name'],
+            'username' => $h['username'], 'active_from_nep' => $h['active_from_nep'],
+            'active_to_nep' => $h['active_to_nep'], 'members' => [],
+        ];
+    }
+    $groups[$key]['members'][] = $h;
+}
+$total_users = count(array_unique(array_column($handlers, 'user_id')));
+$total_goddams_in_list = count(array_unique(array_column($handlers, 'goddam_id')));
+
 require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 ?>
 
@@ -197,19 +226,35 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 .btn-neutral    { background:#f1f5f9; color:#374151; }
 .btn-icon       { background:transparent; border:none; cursor:pointer; padding:5px 7px; border-radius:6px; font-size:1rem; }
 .btn-icon:hover { background:#f3f4f6; }
-.gh-table       { width:100%; border-collapse:collapse; font-size:.87rem; }
-.gh-table thead th { background:#f8fafc; padding:9px 12px; text-align:left; font-size:.72rem; font-weight:700; text-transform:uppercase; letter-spacing:.05em; color:#6b7280; border-bottom:2px solid #e5e7eb; }
-.gh-table tbody tr { border-bottom:1px solid #f1f3f5; }
-.gh-table tbody tr:hover { background:#fafbff; }
-.gh-table td    { padding:10px 12px; vertical-align:middle; color:#374151; }
-.actions-cell   { text-align:center; white-space:nowrap; }
 .badge          { display:inline-block; padding:3px 10px; border-radius:20px; font-size:.73rem; font-weight:700; }
 .badge-active   { background:#d1fae5; color:#065f46; }
 .badge-inactive { background:#f1f5f9; color:#9ca3af; }
-.badge-t        { background:#d4edda; color:#155724; }
-.badge-nt       { background:#d1ecf1; color:#0c5460; }
-.filter-bar     { margin-bottom:16px; }
-.filter-bar select { padding:8px 12px; border:1.5px solid #d1d5db; border-radius:7px; }
+.filter-bar     { display:flex; gap:12px; flex-wrap:wrap; align-items:center; margin-bottom:18px; }
+.filter-bar select, .filter-bar input { padding:8px 12px; border:1.5px solid #d1d5db; border-radius:7px; font-size:.88rem; }
+.filter-bar input { flex:1; min-width:180px; }
+.list-summary   { font-size:.82rem; color:#9ca3af; margin-bottom:14px; }
+
+/* ── Handler cards (grouped by goddam + user + date window) ── */
+.handler-card   { border:1.5px solid #e5e7eb; border-radius:10px; padding:16px 18px; margin-bottom:12px; transition:box-shadow .15s; }
+.handler-card:hover { box-shadow:0 2px 10px rgba(0,0,0,.06); }
+.hc-header      { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+.hc-title       { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:.95rem; }
+.hc-goddam      { font-weight:700; color:#4338ca; }
+.hc-user        { font-weight:700; color:#1e2a3b; }
+.hc-arrow       { color:#9ca3af; }
+.hc-dates       { font-size:.78rem; color:#6b7280; background:#f8fafc; padding:4px 10px; border-radius:6px; }
+.chip-row       { display:flex; flex-wrap:wrap; gap:8px; }
+.chip           { display:inline-flex; align-items:center; gap:6px; padding:5px 6px 5px 12px; border-radius:20px; font-size:.82rem; font-weight:600; border:1.5px solid transparent; }
+.chip .chip-icons { display:inline-flex; gap:2px; }
+.chip button    { background:rgba(255,255,255,.6); border:none; cursor:pointer; padding:3px 6px; border-radius:12px; font-size:.85rem; line-height:1; }
+.chip button:hover { background:#fff; }
+.chip-live      { background:#d1fae5; color:#065f46; border-color:#6ee7b7; }
+.chip-upcoming  { background:#fef3c7; color:#92400e; border-color:#fcd34d; }
+.chip-expired   { background:#fee2e2; color:#991b1b; border-color:#fca5a5; }
+.chip-disabled  { background:#f1f5f9; color:#9ca3af; border-color:#e2e8f0; }
+.status-legend  { display:flex; gap:14px; flex-wrap:wrap; font-size:.78rem; color:#6b7280; margin-bottom:16px; }
+.status-legend span { display:inline-flex; align-items:center; gap:5px; }
+.status-legend i { width:10px; height:10px; border-radius:50%; display:inline-block; }
 .modal-bd       { display:none; position:fixed; inset:0; background:rgba(15,20,35,.5); z-index:2000; align-items:center; justify-content:center; }
 .modal-bd.open  { display:flex; }
 .modal-box      { background:#fff; border-radius:14px; padding:32px 34px; width:560px; max-width:96vw; max-height:92vh; overflow-y:auto; position:relative; }
@@ -303,58 +348,70 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
 
   <div class="gh-card">
     <form method="get" class="filter-bar">
-      <label for="filter_goddam" style="font-weight:600;font-size:.85rem;">Filter by Goddam:</label>
+      <label for="filter_goddam" style="font-weight:600;font-size:.85rem;">Goddam:</label>
       <select id="filter_goddam" name="goddam_id" onchange="this.form.submit()">
         <option value="">All Goddams</option>
         <?php foreach ($goddams as $g): ?>
           <option value="<?= $g['id'] ?>" <?= $goddam_filter === (int)$g['id'] ? 'selected' : '' ?>><?= htmlspecialchars($g['code'] . ' - ' . $g['name']) ?></option>
         <?php endforeach; ?>
       </select>
+      <input type="text" id="userSearch" placeholder="🔎 Filter by user name…" oninput="filterCards()">
     </form>
 
-    <?php if (empty($handlers)): ?>
+    <div class="status-legend">
+      <span><i style="background:#065f46;"></i> Active now</span>
+      <span><i style="background:#92400e;"></i> Upcoming</span>
+      <span><i style="background:#991b1b;"></i> Expired</span>
+      <span><i style="background:#9ca3af;"></i> Disabled</span>
+    </div>
+
+    <?php if (empty($groups)): ?>
       <p style="text-align:center;color:#9ca3af;padding:40px 0;">No handler assignments found.</p>
     <?php else: ?>
-    <div style="overflow-x:auto;">
-    <table class="gh-table">
-      <thead>
-        <tr>
-          <th>Goddam</th><th>User</th><th>Class</th><th>Type</th><th>Active From</th><th>Active To</th><th>Status</th><th style="width:110px;">Actions</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php foreach ($handlers as $h): ?>
-        <tr>
-          <td><?= htmlspecialchars($h['goddam_code']) ?></td>
-          <td><?= htmlspecialchars($h['username']) ?></td>
-          <td><?= htmlspecialchars($h['class_level']) ?></td>
-          <td><span class="badge badge-<?= strtolower($h['book_type']) ?>"><?= htmlspecialchars($h['book_type']) ?></span></td>
-          <td><?= htmlspecialchars($h['active_from_nep']) ?></td>
-          <td><?= $h['active_to_nep'] ? htmlspecialchars($h['active_to_nep']) : '<span style="color:#9ca3af;">open-ended</span>' ?></td>
-          <td><span class="badge badge-<?= $h['is_active'] ? 'active' : 'inactive' ?>"><?= $h['is_active'] ? 'Active' : 'Inactive' ?></span></td>
-          <td class="actions-cell">
-            <button type="button" class="btn-icon" title="Edit"
-              data-id="<?= $h['id'] ?>" data-goddam="<?= $h['goddam_id'] ?>" data-user="<?= $h['user_id'] ?>"
-              data-class="<?= $h['class_level'] ?>" data-type="<?= $h['book_type'] ?>"
-              data-from-nep="<?= htmlspecialchars($h['active_from_nep'], ENT_QUOTES) ?>"
-              data-from-eng="<?= htmlspecialchars($h['active_from_eng'], ENT_QUOTES) ?>"
-              data-to-nep="<?= htmlspecialchars($h['active_to_nep'] ?? '', ENT_QUOTES) ?>"
-              data-to-eng="<?= htmlspecialchars($h['active_to_eng'] ?? '', ENT_QUOTES) ?>"
-              onclick="openEditModal(this)">✏️</button>
-            <form method="post" style="display:inline;">
-              <input type="hidden" name="action" value="toggle_active">
-              <input type="hidden" name="handler_id" value="<?= $h['id'] ?>">
-              <button type="submit" class="btn-icon" title="<?= $h['is_active'] ? 'Deactivate' : 'Activate' ?>"
-                onclick="return confirm('<?= $h['is_active'] ? 'Deactivate' : 'Activate' ?> this assignment?')">
-                <?= $h['is_active'] ? '🚫' : '✅' ?>
-              </button>
-            </form>
-          </td>
-        </tr>
+      <p class="list-summary"><?= count($handlers) ?> assignment(s) across <?= $total_users ?> user(s), <?= $total_goddams_in_list ?> goddam(s).</p>
+      <div id="cardList">
+        <?php foreach ($groups as $grp): ?>
+        <div class="handler-card" data-username="<?= htmlspecialchars(strtolower($grp['username']), ENT_QUOTES) ?>">
+          <div class="hc-header">
+            <div class="hc-title">
+              <span class="hc-goddam">🏬 <?= htmlspecialchars($grp['goddam_code']) ?></span>
+              <span class="hc-arrow">→</span>
+              <span class="hc-user">👤 <?= htmlspecialchars($grp['username']) ?></span>
+            </div>
+            <div class="hc-dates">
+              📅 <?= htmlspecialchars($grp['active_from_nep']) ?>
+              → <?= $grp['active_to_nep'] ? htmlspecialchars($grp['active_to_nep']) : 'open-ended' ?>
+            </div>
+          </div>
+          <div class="chip-row">
+            <?php foreach ($grp['members'] as $h): $st = handlerEffectiveStatus($h, $today); ?>
+              <span class="chip chip-<?= $st['class'] ?>" title="<?= $st['label'] ?>">
+                Class <?= htmlspecialchars($h['class_level']) ?> · <?= htmlspecialchars($h['book_type']) ?>
+                <span class="chip-icons">
+                  <button type="button" title="Edit"
+                    data-id="<?= $h['id'] ?>" data-goddam="<?= $h['goddam_id'] ?>" data-user="<?= $h['user_id'] ?>"
+                    data-class="<?= $h['class_level'] ?>" data-type="<?= $h['book_type'] ?>"
+                    data-from-nep="<?= htmlspecialchars($h['active_from_nep'], ENT_QUOTES) ?>"
+                    data-from-eng="<?= htmlspecialchars($h['active_from_eng'], ENT_QUOTES) ?>"
+                    data-to-nep="<?= htmlspecialchars($h['active_to_nep'] ?? '', ENT_QUOTES) ?>"
+                    data-to-eng="<?= htmlspecialchars($h['active_to_eng'] ?? '', ENT_QUOTES) ?>"
+                    onclick="openEditModal(this)">✏️</button>
+                  <form method="post" style="display:inline;">
+                    <input type="hidden" name="action" value="toggle_active">
+                    <input type="hidden" name="handler_id" value="<?= $h['id'] ?>">
+                    <button type="submit" title="<?= $h['is_active'] ? 'Deactivate' : 'Activate' ?>"
+                      onclick="return confirm('<?= $h['is_active'] ? 'Deactivate' : 'Activate' ?> Class <?= $h['class_level'] ?> · <?= $h['book_type'] ?> for <?= htmlspecialchars($grp['username'], ENT_QUOTES) ?>?')">
+                      <?= $h['is_active'] ? '🚫' : '✅' ?>
+                    </button>
+                  </form>
+                </span>
+              </span>
+            <?php endforeach; ?>
+          </div>
+        </div>
         <?php endforeach; ?>
-      </tbody>
-    </table>
-    </div>
+      </div>
+      <p id="noMatch" style="display:none;text-align:center;color:#9ca3af;padding:20px 0;">No assignments match that search.</p>
     <?php endif; ?>
   </div>
 </div>
@@ -427,6 +484,18 @@ document.querySelectorAll('.add-class-cb').forEach(function(cb) {
         document.getElementById('add_class_all').checked = (all.length === checked.length);
     });
 });
+
+function filterCards() {
+    var q = document.getElementById('userSearch').value.trim().toLowerCase();
+    var cards = document.querySelectorAll('#cardList .handler-card');
+    var visibleCount = 0;
+    cards.forEach(function(card) {
+        var match = !q || card.getAttribute('data-username').indexOf(q) !== -1;
+        card.style.display = match ? '' : 'none';
+        if (match) visibleCount++;
+    });
+    document.getElementById('noMatch').style.display = (visibleCount === 0) ? '' : 'none';
+}
 
 function openEditModal(btn) {
     document.getElementById('edit_handler_id').value = btn.getAttribute('data-id');
