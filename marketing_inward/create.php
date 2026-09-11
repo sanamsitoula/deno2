@@ -12,10 +12,10 @@ $is_admin = has_role('admin');
 $error    = '';
 
 /* ===============================================================
-   D2M DROPDOWN — shows every non-deleted D2M with outstanding lines
-   (any status — DRAFT/CHECKED included), and how much of it is
-   already inwarded (plan §5a: pipeline visibility, not filtered to
-   this user's own eligible slice).
+   D2M DROPDOWN — shows every non-deleted, non-cancelled D2M with
+   outstanding lines (any other status — DRAFT/CHECKED included), and
+   how much of it is already inwarded (plan §5a: pipeline visibility,
+   not filtered to this user's own eligible slice).
 =============================================================== */
 $d2m_options = $conn->query("
     SELECT d.id, d.d2m_no, d.nep_date, d.d2m_type, d.status,
@@ -29,7 +29,7 @@ $d2m_options = $conn->query("
            ) AS inwarded_items
     FROM d2m d
     JOIN d2m_items di ON di.d2m_id = d.id
-    WHERE d.deleted_at IS NULL
+    WHERE d.deleted_at IS NULL AND d.status <> 'CANCELLED'
     GROUP BY d.id
     HAVING COUNT(di.id) > COUNT(di.id) FILTER (
                WHERE di.id IN (

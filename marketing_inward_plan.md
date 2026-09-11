@@ -477,12 +477,13 @@ much of it has already moved into Marketing Inward and how much is still
 outstanding — so anyone can see where the press→marketing pipeline is
 backed up, not just their own eligible slice of it.
 
-**Amended:** the dropdown query no longer restricts by `d.status` at all — it
-shows every non-deleted D2M (DRAFT/CHECKED included, not just
-VERIFIED/CLOSE/APPROVED) as long as it still has an outstanding line, per
-explicit request. The status is now shown in each option's label instead, so
-a DRAFT/CHECKED D2M is still visibly distinguishable from a VERIFIED one —
-the paperwork-confirmed gate this originally enforced is gone by design.
+**Amended:** the dropdown query no longer restricts to
+VERIFIED/CLOSE/APPROVED — it shows every D2M (DRAFT/CHECKED included) as
+long as it still has an outstanding line, per explicit request. Only
+soft-deleted (`deleted_at`) and `CANCELLED` D2Ms are excluded. The status is
+shown in each option's label, so a DRAFT/CHECKED D2M is still visibly
+distinguishable from a VERIFIED one — the paperwork-confirmed gate this
+originally enforced is gone by design.
 
 ```sql
 SELECT d.id, d.d2m_no, d.nep_date, d.d2m_type, d.status,
@@ -496,7 +497,7 @@ SELECT d.id, d.d2m_no, d.nep_date, d.d2m_type, d.status,
        ) AS inwarded_items
 FROM d2m d
 JOIN d2m_items di ON di.d2m_id = d.id
-WHERE d.deleted_at IS NULL
+WHERE d.deleted_at IS NULL AND d.status <> 'CANCELLED'
 GROUP BY d.id
 HAVING COUNT(di.id) > COUNT(di.id) FILTER (
            WHERE di.id IN (
