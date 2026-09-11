@@ -9,7 +9,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     
     try {
         // Check if DENO is used in any D2M
-
         $checkStmt = $conn->prepare("
             SELECT COUNT(*) as count, 
                    string_agg(DISTINCT d.d2m_no, ', ') as d2m_numbers
@@ -86,10 +85,48 @@ $search_params = [
     'translated' => $_GET['translated'] ?? '',
     'ref_no' => $_GET['ref_no'] ?? '',
     'deno_no' => $_GET['deno_no'] ?? '',
+    'entry_type' => $_GET['entry_type'] ?? '',
+    'jt_id' => $_GET['jt_id'] ?? '',
+    'bp_id' => $_GET['bp_id'] ?? '',
     'fiscal_year_id' => $selected_fy_id,
     'start_date' => $start_date,
     'end_date' => $end_date
 ];
+
+// Pre-fill labels for the AJAX search-dropdown filters (book / job ticket / book packing)
+// so a reloaded/shared URL shows the right text instead of a blank box.
+$selected_book_label = '';
+if (!empty($search_params['book_code'])) {
+    $stmt = $conn->prepare("SELECT book_name FROM books WHERE book_code = :c");
+    $stmt->execute([':c' => $search_params['book_code']]);
+    if ($r = $stmt->fetch()) {
+        $selected_book_label = $r['book_name'] . ' (' . $search_params['book_code'] . ')';
+    }
+}
+$selected_jt_label = '';
+if (!empty($search_params['jt_id'])) {
+    $stmt = $conn->prepare("
+        SELECT jt.job_ticket_code, b.book_name
+        FROM job_ticket jt LEFT JOIN books b ON jt.book_id = b.book_id
+        WHERE jt.id = :id
+    ");
+    $stmt->execute([':id' => $search_params['jt_id']]);
+    if ($r = $stmt->fetch()) {
+        $selected_jt_label = $r['job_ticket_code'] . ' — ' . ($r['book_name'] ?? '');
+    }
+}
+$selected_bp_label = '';
+if (!empty($search_params['bp_id'])) {
+    $stmt = $conn->prepare("
+        SELECT bp.name, b.book_name
+        FROM book_packing bp LEFT JOIN books b ON bp.book_code = b.book_code
+        WHERE bp.id = :id
+    ");
+    $stmt->execute([':id' => $search_params['bp_id']]);
+    if ($r = $stmt->fetch()) {
+        $selected_bp_label = $r['name'] . ' — ' . ($r['book_name'] ?? '');
+    }
+}
 
 // Build the base query for counting total records
 $count_query = "
@@ -99,13 +136,15 @@ $count_query = "
     WHERE 1=1
 ";
 
-// Build the main query - WITH D2M NUMBERS
+// Build the main query - WITH D2M NUMBERS + entry-type / JT / BP context
 $query = "
     SELECT d.*,
            b.book_name,
            b.class_level,
            b.is_translated,
            fy.fiscal_name,
+           jt.job_ticket_code,
+           bp.name AS bp_name,
            (
                SELECT COUNT(*) 
                FROM d2m_items di 
@@ -121,8 +160,10 @@ $query = "
                  AND dm.deleted_at IS NULL
            ) as d2m_numbers
     FROM deno d
-    LEFT JOIN books b ON d.book_code = b.book_code
+    LEFT JOIN books b         ON d.book_code = b.book_code
     LEFT JOIN fiscal_years fy ON d.fiscal_year_id = fy.id
+    LEFT JOIN job_ticket jt   ON d.jt_id = jt.id
+    LEFT JOIN book_packing bp ON d.bp_id = bp.id
     WHERE 1=1
 ";
 
@@ -153,6 +194,21 @@ if (!empty($search_params['ref_no'])) {
 if (!empty($search_params['deno_no'])) {
     $conditions .= " AND d.deno_no ILIKE :deno_no";
     $bind_params[':deno_no'] = '%' . $search_params['deno_no'] . '%';
+}
+
+if (!empty($search_params['entry_type'])) {
+    $conditions .= " AND d.entry_type = :entry_type";
+    $bind_params[':entry_type'] = $search_params['entry_type'];
+}
+
+if (!empty($search_params['jt_id'])) {
+    $conditions .= " AND d.jt_id = :jt_id";
+    $bind_params[':jt_id'] = $search_params['jt_id'];
+}
+
+if (!empty($search_params['bp_id'])) {
+    $conditions .= " AND d.bp_id = :bp_id";
+    $bind_params[':bp_id'] = $search_params['bp_id'];
 }
 
 if (!empty($search_params['fiscal_year_id'])) {
@@ -194,9 +250,8 @@ $stmt->bindValue(':offset', $offset, PDO::PARAM_INT);
 $stmt->execute();
 $deno_records = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-// Get distinct class levels and books for dropdowns
+// Get distinct class levels for the filter dropdown
 $class_levels = $conn->query("SELECT DISTINCT class_level FROM books WHERE class_level IS NOT NULL ORDER BY class_level")->fetchAll(PDO::FETCH_COLUMN);
-$books = $conn->query("SELECT book_code, book_name, class_level FROM books ORDER BY book_name")->fetchAll(PDO::FETCH_ASSOC);
 
 // Calculate totals for current page
 $total_poka_qty = 0;
@@ -224,13 +279,16 @@ if (isset($_GET['export']) && $_GET['export'] === 'excel') {
     $export_records = $export_stmt->fetchAll(PDO::FETCH_ASSOC);
     
     echo "<table border='1'>";
-    echo "<tr><th>ID</th><th>Deno No</th><th>Fiscal Year</th><th>Book Name</th><th>Book Code</th><th>Class Level</th><th>Translated</th><th>Ref No</th><th>Nepali Date</th><th>Per Poka</th><th>Poka Qty</th><th>Total Qty</th><th>Open Pcs</th><th>D2M Numbers</th><th>Created By</th><th>Created At</th></tr>";
+    echo "<tr><th>ID</th><th>Deno No</th><th>Fiscal Year</th><th>Entry Type</th><th>JT / BP</th><th>Book Name</th><th>Book Code</th><th>Class Level</th><th>Translated</th><th>Ref No</th><th>Nepali Date</th><th>Per Poka</th><th>Poka Qty</th><th>Total Qty</th><th>Open Pcs</th><th>D2M Numbers</th><th>Created By</th><th>Created At</th></tr>";
 
     foreach ($export_records as $record) {
+        $jtbp = $record['job_ticket_code'] ?? ($record['bp_name'] ?? '');
         echo "<tr>";
         echo "<td>" . $record['id'] . "</td>";
         echo "<td>" . htmlspecialchars($record['deno_no'] ?? '') . "</td>";
         echo "<td>" . htmlspecialchars($record['fiscal_name'] ?? '') . "</td>";
+        echo "<td>" . htmlspecialchars(ucfirst(str_replace('_', ' ', $record['entry_type'] ?? 'direct'))) . "</td>";
+        echo "<td>" . htmlspecialchars($jtbp) . "</td>";
         echo "<td>" . htmlspecialchars($record['book_name']) . "</td>";
         echo "<td>" . htmlspecialchars($record['book_code']) . "</td>";
         echo "<td>" . htmlspecialchars($record['class_level']) . "</td>";
@@ -402,7 +460,7 @@ h2 {
     width: 100%;
     border-collapse: collapse;
     font-size: 12px;
-    min-width: 1400px;
+    min-width: 1500px;
 }
 
 .table th,
@@ -460,6 +518,11 @@ h2 {
     font-style: italic;
     font-size: 11px;
 }
+
+.badge { display:inline-block; padding:3px 8px; border-radius:4px; font-size:11px; font-weight:700; white-space:nowrap; }
+.badge-direct  { background:#cce5ff; color:#004085; }
+.badge-from_jt { background:#d4edda; color:#155724; }
+.badge-from_bp { background:#fff3cd; color:#856404; }
 
 .search-dropdown {
     position: relative;
@@ -585,7 +648,7 @@ h2 {
     <?php endif; ?>
 
     <div class="action-buttons">
-        <?php if (has_role('editor') || has_role('admin') || has_role('operator') ): ?>
+        <?php if (has_role('editor') || has_role('admin')): ?>
             <a href="deno.php" class="btn btn-primary btn-lg shadow-sm">
                 <i class="fas fa-plus-circle me-2"></i>Create New Deno
             </a>
@@ -603,21 +666,11 @@ h2 {
                         <input type="text" 
                                class="search-control dropdown-search" 
                                id="book_search" 
-                               placeholder="Type to search books..."
+                               placeholder="Type to search books…"
                                autocomplete="off"
-                               value="">
+                               value="<?= htmlspecialchars($selected_book_label) ?>">
                         <input type="hidden" name="book_code" id="book_code" value="<?= htmlspecialchars($search_params['book_code']) ?>">
-                        <div class="dropdown-options" id="book_options">
-                            <?php foreach ($books as $book): ?>
-                                <div class="dropdown-option" 
-                                     data-value="<?= $book['book_code'] ?>"
-                                     data-text="<?= $book['book_name'] ?> (<?= $book['book_code'] ?>)"
-                                     data-class="<?= $book['class_level'] ?>">
-                                    <strong><?= htmlspecialchars($book['book_name']) ?></strong><br>
-                                    <small>Code: <?= $book['book_code'] ?> | Class: <?= $book['class_level'] ?></small>
-                                </div>
-                            <?php endforeach; ?>
-                        </div>
+                        <div class="dropdown-options" id="book_options"></div>
                     </div>
                 </div>
                 
@@ -673,6 +726,44 @@ h2 {
 
             <div class="search-row">
                 <div class="search-group">
+                    <label for="entry_type">🗂️ Entry Type:</label>
+                    <select name="entry_type" id="entry_type" class="search-control">
+                        <option value="">All Types</option>
+                        <option value="direct"  <?= $search_params['entry_type'] === 'direct'  ? 'selected' : '' ?>>Direct Entry</option>
+                        <option value="from_jt" <?= $search_params['entry_type'] === 'from_jt' ? 'selected' : '' ?>>From Job Ticket</option>
+                        <option value="from_bp" <?= $search_params['entry_type'] === 'from_bp' ? 'selected' : '' ?>>From Book Packing</option>
+                    </select>
+                </div>
+
+                <div class="search-group">
+                    <label for="jt_search">🎫 Job Ticket:</label>
+                    <div class="search-dropdown">
+                        <input type="text"
+                               class="search-control dropdown-search"
+                               id="jt_search"
+                               placeholder="Type to search job tickets…"
+                               autocomplete="off"
+                               value="<?= htmlspecialchars($selected_jt_label) ?>">
+                        <input type="hidden" name="jt_id" id="jt_id" value="<?= htmlspecialchars($search_params['jt_id']) ?>">
+                        <div class="dropdown-options" id="jt_options"></div>
+                    </div>
+                </div>
+
+                <div class="search-group">
+                    <label for="bp_search">📦 Book Packing:</label>
+                    <div class="search-dropdown">
+                        <input type="text"
+                               class="search-control dropdown-search"
+                               id="bp_search"
+                               placeholder="Type to search book packings…"
+                               autocomplete="off"
+                               value="<?= htmlspecialchars($selected_bp_label) ?>">
+                        <input type="hidden" name="bp_id" id="bp_id" value="<?= htmlspecialchars($search_params['bp_id']) ?>">
+                        <div class="dropdown-options" id="bp_options"></div>
+                    </div>
+                </div>
+
+                <div class="search-group">
                     <label for="start_date">📅 Start Date (YYYY.MM.DD):</label>
                     <input type="text" name="start_date" id="start_date" class="search-control" 
                            pattern="\d{4}\.\d{2}\.\d{2}" 
@@ -715,6 +806,8 @@ h2 {
                     <th>ID</th>
                     <th>Deno No</th>
                     <th>Fiscal Year</th>
+                    <th>Type</th>
+                    <th>JT / BP</th>
                     <th>Book Name</th>
                     <th>Code</th>
                     <th>Class</th>
@@ -738,6 +831,22 @@ h2 {
                         <td><?= $record['id'] ?></td>
                         <td><span style="font-weight:600;color:#007bff;"><?= htmlspecialchars($record['deno_no'] ?? '-') ?></span></td>
                         <td><?= htmlspecialchars($record['fiscal_name'] ?? '-') ?></td>
+                        <td>
+                            <span class="badge badge-<?= htmlspecialchars($record['entry_type'] ?? 'direct') ?>">
+                                <?= ucfirst(str_replace('_', ' ', $record['entry_type'] ?? 'direct')) ?>
+                            </span>
+                        </td>
+                        <td>
+                            <?php if (!empty($record['job_ticket_code'])): ?>
+                                <div>JT: <?= htmlspecialchars($record['job_ticket_code']) ?></div>
+                            <?php endif; ?>
+                            <?php if (!empty($record['bp_name'])): ?>
+                                <div>BP: <?= htmlspecialchars($record['bp_name']) ?></div>
+                            <?php endif; ?>
+                            <?php if (empty($record['job_ticket_code']) && empty($record['bp_name'])): ?>
+                                <span style="color:#999;">-</span>
+                            <?php endif; ?>
+                        </td>
                         <td><strong><?= htmlspecialchars($record['book_name']) ?></strong></td>
                         <td><?= htmlspecialchars($record['book_code']) ?></td>
                         <td><?= $record['class_level'] ?></td>
@@ -796,7 +905,7 @@ h2 {
                     <?php endforeach; ?>
                     
                     <tr class="totals-row">
-                        <td colspan="10"><strong>📊 Page Totals:</strong></td>
+                        <td colspan="11"><strong>📊 Page Totals:</strong></td>
                         <td><strong><?= number_format($total_poka_qty) ?></strong></td>
                         <td><strong><?= number_format($total_quantity) ?></strong></td>
                         <td><strong><?= number_format($total_open_pcs) ?></strong></td>
@@ -804,7 +913,7 @@ h2 {
                     </tr>
                 <?php else: ?>
                     <tr>
-                        <td colspan="17" style="text-align: center; padding: 40px; color: #6c757d;">
+                        <td colspan="19" style="text-align: center; padding: 40px; color: #6c757d;">
                             <strong>📭 No records found matching your search criteria.</strong><br>
                             <small>Try adjusting your search parameters.</small>
                         </td>
@@ -885,108 +994,99 @@ function downloadCSV() {
     document.body.removeChild(link);
 }
 
-// Book search dropdown functionality
-document.addEventListener('DOMContentLoaded', function() {
-    const searchInput = document.getElementById('book_search');
-    const hiddenInput = document.getElementById('book_code');
-    const optionsContainer = document.getElementById('book_options');
-    const options = optionsContainer.querySelectorAll('.dropdown-option');
-    
-    const currentBookCode = "<?= htmlspecialchars($search_params['book_code']) ?>";
-    if (currentBookCode) {
-        const currentOption = document.querySelector(`[data-value="${currentBookCode}"]`);
-        if (currentOption) {
-            searchInput.value = currentOption.dataset.text;
-            hiddenInput.value = currentBookCode;
+/**
+ * Generic AJAX-backed searchable dropdown used for the Book / Job Ticket /
+ * Book Packing filters. Only ever pulls a small page of matches from
+ * search_lookup.php instead of dumping whole tables into the page.
+ */
+function initSearchDropdown(opts) {
+    var input  = document.getElementById(opts.inputId);
+    var hidden = document.getElementById(opts.hiddenId);
+    var box    = document.getElementById(opts.optionsId);
+    var timer  = null;
+    var items  = [];
+    var activeIdx = -1;
+
+    function render(list) {
+        items = list;
+        activeIdx = -1;
+        box.innerHTML = '';
+        if (!list.length) {
+            box.innerHTML = '<div class="dropdown-option" style="color:#999;cursor:default;">No matches found</div>';
+        } else {
+            list.forEach(function (item, i) {
+                var d = document.createElement('div');
+                d.className = 'dropdown-option';
+                d.innerHTML = '<strong>' + item.label + '</strong>' +
+                    (item.sublabel ? '<br><small>' + item.sublabel + '</small>' : '');
+                d.addEventListener('click', function () { select(i); });
+                box.appendChild(d);
+            });
         }
+        box.style.display = 'block';
     }
-    
-    searchInput.addEventListener('focus', function() {
-        optionsContainer.style.display = 'block';
-        filterOptions();
+
+    function select(i) {
+        var item = items[i];
+        if (!item) return;
+        hidden.value = item.value;
+        input.value  = item.label;
+        box.style.display = 'none';
+        if (opts.onSelect) opts.onSelect(item);
+    }
+
+    function search(term) {
+        fetch('search_lookup.php?type=' + encodeURIComponent(opts.type) + '&q=' + encodeURIComponent(term))
+            .then(function (r) { return r.json(); })
+            .then(render)
+            .catch(function () { render([]); });
+    }
+
+    input.addEventListener('input', function () {
+        hidden.value = '';
+        clearTimeout(timer);
+        var term = input.value.trim();
+        timer = setTimeout(function () { search(term); }, 250);
     });
-    
-    searchInput.addEventListener('input', function() {
-        filterOptions();
-        optionsContainer.style.display = 'block';
-        if (this.value === '') {
-            hiddenInput.value = '';
+
+    input.addEventListener('focus', function () { search(input.value.trim()); });
+
+    input.addEventListener('keydown', function (e) {
+        var opts_ = box.querySelectorAll('.dropdown-option');
+        if (e.key === 'ArrowDown') { e.preventDefault(); activeIdx = Math.min(activeIdx + 1, opts_.length - 1); highlight(opts_); }
+        else if (e.key === 'ArrowUp') { e.preventDefault(); activeIdx = Math.max(activeIdx - 1, 0); highlight(opts_); }
+        else if (e.key === 'Enter') { e.preventDefault(); if (activeIdx >= 0) select(activeIdx); }
+        else if (e.key === 'Escape') { box.style.display = 'none'; }
+    });
+
+    function highlight(opts_) {
+        opts_.forEach(function (o, i) { o.style.background = (i === activeIdx) ? '#f0f7ff' : ''; });
+    }
+
+    document.addEventListener('click', function (e) {
+        if (!e.target.closest('#' + opts.inputId) && !e.target.closest('#' + opts.optionsId)) {
+            box.style.display = 'none';
         }
     });
-    
-    document.addEventListener('click', function(e) {
-        if (!e.target.closest('.search-dropdown')) {
-            optionsContainer.style.display = 'none';
-        }
-    });
-    
-    function filterOptions() {
-        const searchTerm = searchInput.value.toLowerCase();
-        
-        options.forEach(option => {
-            const text = option.textContent.toLowerCase();
-            const bookCode = option.dataset.value.toLowerCase();
-            
-            if (text.includes(searchTerm) || bookCode.includes(searchTerm)) {
-                option.style.display = 'block';
-            } else {
-                option.style.display = 'none';
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+
+    /* ── BOOK FILTER (AJAX search, also syncs the Class Level select) ── */
+    initSearchDropdown({
+        inputId: 'book_search', hiddenId: 'book_code', optionsId: 'book_options', type: 'book',
+        onSelect: function (item) {
+            if (item.class_level) {
+                document.getElementById('class_level').value = item.class_level;
             }
-        });
-    }
-    
-    options.forEach(option => {
-        option.addEventListener('click', function() {
-            searchInput.value = this.dataset.text;
-            hiddenInput.value = this.dataset.value;
-            optionsContainer.style.display = 'none';
-            
-            const classLevel = this.dataset.class;
-            if (classLevel && classLevel !== 'null') {
-                const classSelect = document.getElementById('class_level');
-                classSelect.value = classLevel;
-            }
-        });
-    });
-    
-    let selectedIndex = -1;
-    const visibleOptions = () => Array.from(options).filter(opt => opt.style.display !== 'none');
-    
-    searchInput.addEventListener('keydown', function(e) {
-        const visible = visibleOptions();
-        
-        switch(e.key) {
-            case 'ArrowDown':
-                e.preventDefault();
-                selectedIndex = Math.min(selectedIndex + 1, visible.length - 1);
-                updateSelection(visible);
-                break;
-            case 'ArrowUp':
-                e.preventDefault();
-                selectedIndex = Math.max(selectedIndex - 1, -1);
-                updateSelection(visible);
-                break;
-            case 'Enter':
-                e.preventDefault();
-                if (selectedIndex >= 0 && visible[selectedIndex]) {
-                    visible[selectedIndex].click();
-                }
-                break;
-            case 'Escape':
-                optionsContainer.style.display = 'none';
-                selectedIndex = -1;
-                break;
         }
     });
-    
-    function updateSelection(visible) {
-        options.forEach(opt => opt.style.backgroundColor = '');
-        
-        if (selectedIndex >= 0 && visible[selectedIndex]) {
-            visible[selectedIndex].style.backgroundColor = '#e9ecef';
-            visible[selectedIndex].scrollIntoView({ block: 'nearest' });
-        }
-    }
+
+    /* ── JOB TICKET FILTER ── */
+    initSearchDropdown({ inputId: 'jt_search', hiddenId: 'jt_id', optionsId: 'jt_options', type: 'job_ticket' });
+
+    /* ── BOOK PACKING FILTER ── */
+    initSearchDropdown({ inputId: 'bp_search', hiddenId: 'bp_id', optionsId: 'bp_options', type: 'book_packing' });
 });
 
 // Date validation and formatting
@@ -1078,6 +1178,10 @@ document.getElementById('translated').addEventListener('change', function() {
     document.getElementById('searchForm').submit();
 });
 
+document.getElementById('entry_type').addEventListener('change', function() {
+    document.getElementById('searchForm').submit();
+});
+
 // Switching fiscal year: clear the date inputs first so the server recomputes
 // the date range for the newly selected year instead of resending the old
 // year's dates (which would hide the new year's records again).
@@ -1090,7 +1194,7 @@ document.getElementById('fiscal_year_id').addEventListener('change', function() 
 document.addEventListener('DOMContentLoaded', function() {
     const refNoSearch = "<?= htmlspecialchars($search_params['ref_no']) ?>";
     if (refNoSearch) {
-        const cells = document.querySelectorAll('tbody td:nth-child(6)');
+        const cells = document.querySelectorAll('tbody td:nth-child(10)');
         cells.forEach(cell => {
             const text = cell.textContent;
             const highlightedText = text.replace(new RegExp(`(${refNoSearch})`, 'gi'), '<mark style="background-color: #fff3cd;">$1</mark>');
