@@ -28,6 +28,31 @@ function get_month_nep_from_date(string $nep_date): ?string {
     return $month_names[$month_num] ?? null;
 }
 
+/* ══════════════════════════════════════════════════
+   Helper: derive Nepali fiscal year from a Nepali date.
+   Fiscal year runs Shrawan (month 4) .. Ashadh (month 3)
+   of the following BS year.
+     Shrawan..Chaitra of year Y   -> fiscal year "Y/Y+1"
+     Baishakh..Ashadh of year Y   -> fiscal year "Y-1/Y"
+   e.g. 2083.04.01 (Shrawan 2083) -> "2083/84"
+        2083.01.01 (Baishakh 2083) -> "2082/83"
+══════════════════════════════════════════════════ */
+function get_fiscal_year_from_date(string $nep_date): ?string {
+    $normalised = str_replace(['-', '/'], '.', trim($nep_date));
+    $parts = explode('.', $normalised);
+    if (count($parts) < 2) return null;
+    $year  = (int)$parts[0];
+    $month = (int)$parts[1];
+    if ($year <= 0 || $month < 1 || $month > 12) return null;
+
+    if ($month >= 4) {
+        // Shrawan..Chaitra -> Y/Y+1
+        return $year . '/' . substr((string)($year + 1), -2);
+    }
+    // Baishakh..Ashadh -> Y-1/Y
+    return ($year - 1) . '/' . substr((string)$year, -2);
+}
+
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
@@ -36,7 +61,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $action = $_POST['action'] ?? 'create';
         
         if ($action === 'create') {
-            $required_fields = ['vehicle_id', 'log_date_nep', 'log_date_eng', 'log_end_date_nep', 'log_end_date_eng', 'start_meter', 'end_meter', 'fiscal_year'];
+            $required_fields = ['vehicle_id', 'log_date_nep', 'log_date_eng', 'log_end_date_nep', 'log_end_date_eng', 'start_meter', 'end_meter'];
 
             foreach ($required_fields as $field) {
                 if (empty($_POST[$field])) {
@@ -51,8 +76,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception("To date cannot be earlier than From date.");
             }
 
-            // Derive month_nep reliably — supports 2082.12.01 and 2082-12-01
-            $month_nep = get_month_nep_from_date($_POST['log_date_nep']);
+            // Derive month_nep and fiscal_year reliably from the entered Nepali date —
+            // never trust a manually-typed/stale fiscal year value from the form.
+            $month_nep   = get_month_nep_from_date($_POST['log_date_nep']);
+            $fiscal_year = get_fiscal_year_from_date($_POST['log_date_nep']);
+            if (!$fiscal_year) {
+                throw new Exception("Could not determine fiscal year from the From Date (Nepali). Please check the date format.");
+            }
 
             $insert_sql = "
                 INSERT INTO vehicle_daily_logs (
@@ -83,12 +113,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':purpose'            => $_POST['purpose']       ?? null,
                 ':fuel_used_estimated'=> $_POST['fuel_used_estimated'] ?: null,
                 ':remarks'            => $_POST['remarks']       ?? null,
-                ':fiscal_year'        => $_POST['fiscal_year'],
+                ':fiscal_year'        => $fiscal_year,
                 ':month_nep'          => $month_nep,
                 ':created_by'         => $logged_user_id
             ]);
 
-            $success_message = "Vehicle log created successfully!";
+            $success_message = "Vehicle log created successfully! (Fiscal Year auto-set to {$fiscal_year}, Month: {$month_nep})";
 
         } elseif ($action === 'update') {
             if ((int)$_POST['end_meter'] < (int)$_POST['start_meter']) {
@@ -98,7 +128,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception("To date cannot be earlier than From date.");
             }
 
-            $month_nep = get_month_nep_from_date($_POST['log_date_nep']);
+            $month_nep   = get_month_nep_from_date($_POST['log_date_nep']);
+            $fiscal_year = get_fiscal_year_from_date($_POST['log_date_nep']);
+            if (!$fiscal_year) {
+                throw new Exception("Could not determine fiscal year from the From Date (Nepali). Please check the date format.");
+            }
 
             $update_sql = "
                 UPDATE vehicle_daily_logs SET
@@ -138,12 +172,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':purpose'            => $_POST['purpose']       ?? null,
                 ':fuel_used_estimated'=> $_POST['fuel_used_estimated'] ?: null,
                 ':remarks'            => $_POST['remarks']       ?? null,
-                ':fiscal_year'        => $_POST['fiscal_year'],
+                ':fiscal_year'        => $fiscal_year,
                 ':month_nep'          => $month_nep,
                 ':updated_by'         => $logged_user_id
             ]);
 
-            $success_message = "Vehicle log updated successfully!";
+            $success_message = "Vehicle log updated successfully! (Fiscal Year auto-set to {$fiscal_year}, Month: {$month_nep})";
             
         } elseif ($action === 'delete') {
             $stmt = $conn->prepare("UPDATE vehicle_daily_logs SET deleted_at = CURRENT_TIMESTAMP WHERE log_id = :log_id");
@@ -280,6 +314,7 @@ body {
     outline: none; border-color: #007bff; box-shadow: 0 0 0 3px rgba(0,123,255,.1);
 }
 .form-textarea { resize: vertical; min-height: 80px; }
+.form-input[readonly] { background: #f1f3f5; color: #333; font-weight: 600; cursor: not-allowed; }
 
 /* Distance badge */
 .distance-badge {
@@ -309,6 +344,7 @@ body {
 
 /* Month badge */
 .month-badge { display:inline-block; background:#e7f3ff; color:#004085; border-radius:4px; padding:1px 6px; font-size:11px; font-weight:600; }
+.fy-badge { display:inline-block; background:#fff3cd; color:#856404; border-radius:4px; padding:1px 6px; font-size:11px; font-weight:600; margin-left:4px; }
 </style>
 
 <div class="container">
@@ -427,7 +463,8 @@ body {
 
                 <div class="form-group">
                     <label class="form-label required">Fiscal Year</label>
-                    <input type="text" name="fiscal_year" class="form-input" value="2082/83" required>
+                    <input type="text" name="fiscal_year" id="fiscal_year" class="form-input" value="" readonly required>
+                    <small style="color:#6c757d;margin-top:4px">Auto-calculated from From Date (Nepali) — not editable</small>
                 </div>
             </div>
 
@@ -516,6 +553,7 @@ body {
                     <th>#</th>
                     <th>Trip Date</th>
                     <th>Month</th>
+                    <th>Fiscal Year</th>
                     <th>Vehicle</th>
                     <th>Driver</th>
                     <th>Start KM</th>
@@ -529,11 +567,13 @@ body {
             <tbody>
                 <?php if (empty($logs)): ?>
                     <tr>
-                        <td colspan="11" style="text-align:center;padding:40px;color:#666">No logs found</td>
+                        <td colspan="12" style="text-align:center;padding:40px;color:#666">No logs found</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($logs as $idx => $log): 
                         $distance = (int)$log['end_meter'] - (int)$log['start_meter'];
+                        $expected_fy = get_fiscal_year_from_date($log['log_date_nep']);
+                        $fy_mismatch = $expected_fy && $expected_fy !== $log['fiscal_year'];
                     ?>
                         <tr>
                             <td><?= $idx + 1 ?></td>
@@ -555,6 +595,12 @@ body {
                                     <span class="month-badge"><?= htmlspecialchars($log['month_nep']) ?></span>
                                 <?php else: ?>
                                     <span style="color:#dc3545;font-size:11px">⚠ Missing</span>
+                                <?php endif; ?>
+                            </td>
+                            <td>
+                                <?= htmlspecialchars($log['fiscal_year']) ?>
+                                <?php if ($fy_mismatch): ?>
+                                    <br><span class="fy-badge" title="Expected <?= htmlspecialchars($expected_fy) ?> based on the trip date">⚠ expected <?= htmlspecialchars($expected_fy) ?></span>
                                 <?php endif; ?>
                             </td>
                             <td>
@@ -602,6 +648,22 @@ const nepMonths = {
     9:'Poush',   10:'Magh',  11:'Falgun', 12:'Chaitra'
 };
 
+// Nepali fiscal year runs Shrawan(4)..Chaitra(12) of year Y, then Baishakh(1)..Ashadh(3) of Y+1,
+// under fiscal-year label "Y/Y+1". Mirrors get_fiscal_year_from_date() on the server.
+function computeFiscalYear(nepDateStr) {
+    if (!nepDateStr) return null;
+    const val = nepDateStr.replace(/-/g, '.').replace(/\//g, '.');
+    const parts = val.split('.');
+    if (parts.length < 2) return null;
+    const year  = parseInt(parts[0], 10);
+    const month = parseInt(parts[1], 10);
+    if (!year || !month || month < 1 || month > 12) return null;
+    if (month >= 4) {
+        return year + '/' + String(year + 1).slice(-2);
+    }
+    return (year - 1) + '/' + String(year).slice(-2);
+}
+
 document.addEventListener('DOMContentLoaded', function () {
     const vehicleSelect   = document.getElementById('vehicle_id');
     const driverSelect    = document.getElementById('driver_id');
@@ -611,6 +673,7 @@ document.addEventListener('DOMContentLoaded', function () {
     const distDisplay     = document.getElementById('distance_display');
     const nepDateInput    = document.getElementById('log_date_nep');
     const monthPreview    = document.getElementById('nep_month_preview');
+    const fiscalYearInput = document.getElementById('fiscal_year');
 
     // Auto-fill current driver + previous end meter when vehicle is selected
     vehicleSelect.addEventListener('change', function () {
@@ -624,12 +687,15 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // Show month name preview as user types Nepali date
+    // Show month name + fiscal year preview as user types Nepali date
     function updateMonthPreview() {
         const val = nepDateInput.value.replace(/-/g, '.').replace(/\//g, '.');
         const parts = val.split('.');
         const mNum = parts.length >= 2 ? parseInt(parts[1], 10) : 0;
         monthPreview.textContent = nepMonths[mNum] || '—';
+
+        const fy = computeFiscalYear(nepDateInput.value);
+        fiscalYearInput.value = fy || '';
     }
     nepDateInput.addEventListener('input', updateMonthPreview);
 

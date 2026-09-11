@@ -180,6 +180,59 @@ foreach ($raw_rows as $r) {
 }
 
 /* ══════════════════════════════════════════════════
+   BACKFILL — vehicles/months that have daily logs
+   (trips) but no fuel coupon distribution that month.
+   Without this, such months never get a $summary row
+   at all, so opening/closing meter & total KM have
+   nowhere to attach and silently vanish from the report.
+   Skipped when a fuel/expense-type filter is active,
+   since those filters only make sense against coupon data.
+══════════════════════════════════════════════════ */
+if (empty($f_fuel_type) && empty($f_exp_type)) {
+    $vmap = [];
+    foreach ($vehicles as $v) { $vmap[$v['vehicle_id']] = $v; }
+
+    $lg_sql = "
+        SELECT DISTINCT vdl.vehicle_id, vdl.month_nep, vdl.fiscal_year,
+               COALESCE(d2.driver_name, d.driver_name, '') AS driver_name,
+               COALESCE(d2.driver_id, d.driver_id, 0)       AS driver_id
+        FROM vehicle_daily_logs vdl
+        LEFT JOIN drivers d2 ON d2.driver_id = vdl.driver_id
+        LEFT JOIN vehicle_driver_assignments vda
+               ON vda.vehicle_id = vdl.vehicle_id AND vda.active_flag=TRUE AND vda.deleted_at IS NULL
+        LEFT JOIN drivers d ON d.driver_id = vda.driver_id
+        WHERE vdl.deleted_at IS NULL
+          AND vdl.month_nep IS NOT NULL AND TRIM(vdl.month_nep) <> ''";
+    $lg_params = [];
+    if ($f_fiscal)  { $lg_sql .= " AND vdl.fiscal_year = :lgfy";  $lg_params[':lgfy']  = $f_fiscal; }
+    if ($f_month)   { $lg_sql .= " AND vdl.month_nep   = :lgmn";  $lg_params[':lgmn']  = $f_month; }
+    if ($f_vehicle) { $lg_sql .= " AND vdl.vehicle_id  = :lgvid"; $lg_params[':lgvid'] = $f_vehicle; }
+    if ($f_driver)  {
+        $lg_sql .= " AND (vdl.driver_id = :lgdid OR (vdl.driver_id IS NULL AND vda.driver_id = :lgdid2))";
+        $lg_params[':lgdid'] = $f_driver; $lg_params[':lgdid2'] = $f_driver;
+    }
+
+    $lg_stmt = $conn->prepare($lg_sql);
+    $lg_stmt->execute($lg_params);
+
+    foreach ($lg_stmt->fetchAll(PDO::FETCH_ASSOC) as $lg) {
+        $vid = $lg['vehicle_id']; $mon = $lg['month_nep'];
+        if (isset($summary[$vid][$mon])) continue;   // already has fuel-distribution data
+        if (!isset($vmap[$vid])) continue;            // inactive/deleted vehicle, skip
+        $summary[$vid][$mon] = [
+            'vehicle_id'=>$vid,'vehicle_no'=>$vmap[$vid]['vehicle_no'],'vehicle_type'=>$vmap[$vid]['vehicle_type'],
+            'driver'=>$lg['driver_name'],'driver_id'=>$lg['driver_id'],
+            'dist_month'=>$mon,'fiscal_year'=>$lg['fiscal_year'],
+            'fuel_std'=>$vmap[$vid]['fuel_per_liter_standard'],
+            'opening_meter'=>null,'closing_meter'=>null,'total_km'=>0,
+            'petrol_qty'=>0,'petrol_amt'=>0,'diesel_qty'=>0,'diesel_amt'=>0,
+            'mobil_qty'=>0,'mobil_amt'=>0,'total_qty'=>0,'total_amt'=>0,
+            'coupon_details'=>[],
+        ];
+    }
+}
+
+/* ══════════════════════════════════════════════════
    METER READINGS — from vehicle_daily_logs
 ══════════════════════════════════════════════════ */
 if (!empty($summary)) {
@@ -865,12 +918,16 @@ PYEOF;
     </thead>
     <tbody>
     <?php if(empty($flat)): ?>
-        <tr><td colspan="22" style="padding:25px;text-align:center;color:#666">
+        <tr><td colspan="21" style="padding:25px;text-align:center;color:#666">
             No distribution records found. Adjust filters or use ⚡ Generate.
         </td></tr>
     <?php else: ?>
     <?php foreach($flat as $i=>$s):
-        $fuel_qty = $s['petrol_qty'] + $s['diesel_qty'];
+        /* Average km/L: total distance ÷ total running-fuel liters.
+           A vehicle is fuelled by either petrol OR diesel (never both),
+           so this is simply whichever of the two is non-zero — mobil
+           (engine oil) is excluded since it isn't a running fuel. */
+        $fuel_qty = $s['petrol_qty'] > 0 ? $s['petrol_qty'] : $s['diesel_qty'];
         $avg = ($s['total_km']>0&&$fuel_qty>0) ? $s['total_km']/$fuel_qty : 0;
         $std = (float)($s['fuel_std']??11.5);
         $perf= $avg==0?'—':($avg>=$std?'On/Above Std':'Below Std');
@@ -907,7 +964,7 @@ PYEOF;
         <td class="no-print"><button class="expand-btn" onclick="toggleDetail('<?=$rowid?>')">&#9660; Detail</button></td>
     </tr>
     <!-- coupon detail -->
-    <tr><td colspan="22" style="padding:0;border:0">
+    <tr><td colspan="21" style="padding:0;border:0">
     <div class="coupon-detail" id="<?=$rowid?>">
     <?php foreach($s['coupon_details'] as $cid=>$cd):
         $fl=strtoupper($cd['fuel_type']);
@@ -950,6 +1007,10 @@ PYEOF;
     <?php endforeach;?>
 
     <!-- grand total -->
+    <?php
+        $gt_fuel_for_avg = $gt_p_q + $gt_d_q; // fleet-wide: sum of all petrol+diesel liters
+        $gt_avg = ($gt_km>0 && $gt_fuel_for_avg>0) ? $gt_km/$gt_fuel_for_avg : 0;
+    ?>
     <tr class="tot">
         <td colspan="4" class="tr">जम्मा (Grand Total)</td>
         <td>—</td><td>—</td><td><?=number_format($gt_km)?></td>
@@ -961,7 +1022,8 @@ PYEOF;
         <td class="mob tr">रू <?=number_format($gt_m_a,2)?></td>
         <td class="tr">रू <?=number_format($gt_amt,2)?></td>
         <td><?=number_format($gt_qty,2)?></td>
-        <td colspan="6"></td>
+        <td><strong><?=$gt_avg>0?number_format($gt_avg,2):'—'?></strong></td>
+        <td colspan="5"></td>
     </tr>
     <?php endif;?>
     </tbody>
