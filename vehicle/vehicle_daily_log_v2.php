@@ -236,8 +236,26 @@ foreach ($lm_stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
     $vehicle_last_meter[$row['vehicle_id']] = (int)$row['end_meter'];
 }
 
+// Fiscal years for the filter dropdown + dynamic default (active row, or most recent as fallback)
+$fiscal_years = $conn->query("
+    SELECT fiscal_code, fiscal_name, is_active
+    FROM fiscal_years
+    ORDER BY start_date DESC
+")->fetchAll(PDO::FETCH_ASSOC);
+
+$active_fiscal_year = null;
+foreach ($fiscal_years as $fy) {
+    if ($fy['is_active']) {
+        $active_fiscal_year = $fy['fiscal_name'];
+        break;
+    }
+}
+if (!$active_fiscal_year && !empty($fiscal_years)) {
+    $active_fiscal_year = $fiscal_years[0]['fiscal_name'];
+}
+
 // Fetch logs with filters
-$filter_fiscal  = $_GET['fiscal_year'] ?? '2082/83';
+$filter_fiscal  = $_GET['fiscal_year'] ?? $active_fiscal_year ?? '';
 $filter_month   = $_GET['month_nep']   ?? '';
 $filter_vehicle = $_GET['vehicle_id']  ?? '';
 
@@ -277,7 +295,8 @@ $stmt = $conn->prepare("
         vdl.to_location,
         vdl.purpose,
         vdl.remarks,
-        vdl.month_nep
+        vdl.month_nep,
+        vdl.fiscal_year
     FROM vehicle_daily_logs vdl
     JOIN vehicles v ON vdl.vehicle_id = v.vehicle_id
     LEFT JOIN drivers d ON vdl.driver_id = d.driver_id
@@ -508,8 +527,14 @@ body {
             <div class="filter-grid">
                 <div class="form-group">
                     <label class="form-label">Fiscal Year</label>
-                    <input type="text" name="fiscal_year" class="form-input" 
-                           value="<?= htmlspecialchars($filter_fiscal) ?>">
+                    <select name="fiscal_year" class="form-select">
+                        <option value="">All Fiscal Years</option>
+                        <?php foreach ($fiscal_years as $fy): ?>
+                            <option value="<?= htmlspecialchars($fy['fiscal_name']) ?>" <?= $filter_fiscal === $fy['fiscal_name'] ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($fy['fiscal_name']) ?><?= $fy['is_active'] ? ' (active)' : '' ?>
+                            </option>
+                        <?php endforeach; ?>
+                    </select>
                 </div>
                 <div class="form-group">
                     <label class="form-label">Month</label>
