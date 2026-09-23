@@ -27,7 +27,7 @@ $stmt = $conn->prepare("
     SELECT end_meter, log_date_eng, log_date_nep
     FROM vehicle_daily_logs
     WHERE vehicle_id = :vehicle_id AND deleted_at IS NULL
-    ORDER BY log_date_eng DESC, log_id DESC
+    ORDER BY log_date_nep DESC, log_id DESC
     LIMIT 1
 ");
 $stmt->execute([':vehicle_id' => $vehicle_id]);
