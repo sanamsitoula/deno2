@@ -20,46 +20,49 @@ function get_month_nep_from_date(string $nep_date): ?string {
         5 => 'Bhadra',   6 => 'Ashwin',  7 => 'Kartik',   8 => 'Mangsir',
         9 => 'Poush',   10 => 'Magh',   11 => 'Falgun',   12 => 'Chaitra'
     ];
-    // Normalise any separator to '.'
     $normalised = str_replace(['-', '/'], '.', trim($nep_date));
     $parts = explode('.', $normalised);
-    // Parts: [YYYY, MM, DD]  — month is always index 1
     $month_num = isset($parts[1]) ? (int)$parts[1] : 0;
     return $month_names[$month_num] ?? null;
 }
 
 /* ══════════════════════════════════════════════════
-   Helper: derive Nepali fiscal year from a Nepali date.
-   Fiscal year runs Shrawan (month 4) .. Ashadh (month 3)
-   of the following BS year.
-     Shrawan..Chaitra of year Y   -> fiscal year "Y/Y+1"
-     Baishakh..Ashadh of year Y   -> fiscal year "Y-1/Y"
-   e.g. 2083.04.01 (Shrawan 2083) -> "2083/84"
-        2083.01.01 (Baishakh 2083) -> "2082/83"
-══════════════════════════════════════════════════ */
-function get_fiscal_year_from_date(string $nep_date): ?string {
-    $normalised = str_replace(['-', '/'], '.', trim($nep_date));
-    $parts = explode('.', $normalised);
-    if (count($parts) < 2) return null;
-    $year  = (int)$parts[0];
-    $month = (int)$parts[1];
-    if ($year <= 0 || $month < 1 || $month > 12) return null;
+   Helper: derive fiscal year from the DB, not by
+   hand-formatting a string.
 
-    if ($month >= 4) {
-        // Shrawan..Chaitra -> Y/Y+1
-        return $year . '/' . substr((string)($year + 1), -2);
-    }
-    // Baishakh..Ashadh -> Y-1/Y
-    return ($year - 1) . '/' . substr((string)$year, -2);
+   Root cause fix: the old code built strings like
+   "2083/84" (slash) while public.fiscal_years.fiscal_name
+   is stored as "2083-84" (hyphen). That mismatch meant a
+   freshly-created log's fiscal_year value could never match
+   any row in fiscal_years -> broken filtering, broken
+   "active fiscal year" selection, and undefined-key
+   fallbacks further down the page.
+
+   This version looks up the fiscal_name straight from
+   fiscal_years using the log's ENGLISH date against
+   start_date/end_date, so the stored value is always
+   byte-for-byte identical to what's in fiscal_years —
+   whatever naming convention you use there.
+══════════════════════════════════════════════════ */
+function get_fiscal_year_for_date(PDO $conn, string $log_date_eng): ?string {
+    $stmt = $conn->prepare("
+        SELECT fiscal_name
+        FROM fiscal_years
+        WHERE :d BETWEEN start_date AND end_date
+        LIMIT 1
+    ");
+    $stmt->execute([':d' => $log_date_eng]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    return $row['fiscal_name'] ?? null;
 }
 
 // Handle form submission
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
         $conn->beginTransaction();
-        
+
         $action = $_POST['action'] ?? 'create';
-        
+
         if ($action === 'create') {
             $required_fields = ['vehicle_id', 'log_date_nep', 'log_date_eng', 'log_end_date_nep', 'log_end_date_eng', 'start_meter', 'end_meter'];
 
@@ -76,12 +79,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception("To date cannot be earlier than From date.");
             }
 
-            // Derive month_nep and fiscal_year reliably from the entered Nepali date —
-            // never trust a manually-typed/stale fiscal year value from the form.
+            // Derive month_nep from the Nepali date, and fiscal_year from the
+            // authoritative fiscal_years table (never trust a posted value).
             $month_nep   = get_month_nep_from_date($_POST['log_date_nep']);
-            $fiscal_year = get_fiscal_year_from_date($_POST['log_date_nep']);
+            $fiscal_year = get_fiscal_year_for_date($conn, $_POST['log_date_eng']);
             if (!$fiscal_year) {
-                throw new Exception("Could not determine fiscal year from the From Date (Nepali). Please check the date format.");
+                throw new Exception("No fiscal year record in Fiscal Years covers {$_POST['log_date_eng']}. Please add/extend a fiscal year first.");
             }
 
             $insert_sql = "
@@ -121,6 +124,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $success_message = "Vehicle log created successfully! (Fiscal Year auto-set to {$fiscal_year}, Month: {$month_nep})";
 
         } elseif ($action === 'update') {
+            if (empty($_POST['log_id'])) {
+                throw new Exception("Missing log_id for update.");
+            }
             if ((int)$_POST['end_meter'] < (int)$_POST['start_meter']) {
                 throw new Exception("End meter reading cannot be less than start meter reading.");
             }
@@ -129,9 +135,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
 
             $month_nep   = get_month_nep_from_date($_POST['log_date_nep']);
-            $fiscal_year = get_fiscal_year_from_date($_POST['log_date_nep']);
+            $fiscal_year = get_fiscal_year_for_date($conn, $_POST['log_date_eng']);
             if (!$fiscal_year) {
-                throw new Exception("Could not determine fiscal year from the From Date (Nepali). Please check the date format.");
+                throw new Exception("No fiscal year record in Fiscal Years covers {$_POST['log_date_eng']}. Please add/extend a fiscal year first.");
             }
 
             $update_sql = "
@@ -178,15 +184,18 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ]);
 
             $success_message = "Vehicle log updated successfully! (Fiscal Year auto-set to {$fiscal_year}, Month: {$month_nep})";
-            
+
         } elseif ($action === 'delete') {
+            if (empty($_POST['log_id'])) {
+                throw new Exception("Missing log_id for delete.");
+            }
             $stmt = $conn->prepare("UPDATE vehicle_daily_logs SET deleted_at = CURRENT_TIMESTAMP WHERE log_id = :log_id");
             $stmt->execute([':log_id' => $_POST['log_id']]);
             $success_message = "Vehicle log deleted successfully!";
         }
-        
+
         $conn->commit();
-        
+
     } catch (Exception $e) {
         $conn->rollBack();
         $error_message = $e->getMessage();
@@ -195,16 +204,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 // Fetch dropdown data
 $vehicles = $conn->query("
-    SELECT vehicle_id, vehicle_no, vehicle_type, fuel_type 
-    FROM vehicles 
-    WHERE status = TRUE AND deleted_at IS NULL 
+    SELECT vehicle_id, vehicle_no, vehicle_type, fuel_type
+    FROM vehicles
+    WHERE status = TRUE AND deleted_at IS NULL
     ORDER BY vehicle_no
 ")->fetchAll(PDO::FETCH_ASSOC);
 
 $drivers = $conn->query("
-    SELECT driver_id, driver_name, license_no 
-    FROM drivers 
-    WHERE status = TRUE AND deleted_at IS NULL 
+    SELECT driver_id, driver_name, license_no
+    FROM drivers
+    WHERE status = TRUE AND deleted_at IS NULL
     ORDER BY driver_name
 ")->fetchAll(PDO::FETCH_ASSOC);
 
@@ -223,8 +232,7 @@ while ($row = $assign_query->fetch(PDO::FETCH_ASSOC)) {
     ];
 }
 
-// Latest known end meter per vehicle (used to auto-fill next log's start meter,
-// e.g. Falgun's start meter = Magh's end meter)
+// Latest known end meter per vehicle (used to auto-fill next log's start meter)
 $vehicle_last_meter = [];
 $lm_stmt = $conn->query("
     SELECT DISTINCT ON (vehicle_id) vehicle_id, end_meter
@@ -237,8 +245,9 @@ foreach ($lm_stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
 }
 
 // Fiscal years for the filter dropdown + dynamic default (active row, or most recent as fallback)
+// fiscal_name is the ONLY value used anywhere (dropdown, filter, storage, badges) — uniform end to end.
 $fiscal_years = $conn->query("
-    SELECT fiscal_code, fiscal_name, is_active
+    SELECT fiscal_code, fiscal_name, is_active, start_date, end_date
     FROM fiscal_years
     ORDER BY start_date DESC
 ")->fetchAll(PDO::FETCH_ASSOC);
@@ -276,7 +285,7 @@ if ($filter_vehicle) {
 }
 
 $stmt = $conn->prepare("
-    SELECT 
+    SELECT
         vdl.log_id,
         vdl.log_date_nep,
         vdl.log_date_eng,
@@ -335,7 +344,6 @@ body {
 .form-textarea { resize: vertical; min-height: 80px; }
 .form-input[readonly] { background: #f1f3f5; color: #333; font-weight: 600; cursor: not-allowed; }
 
-/* Distance badge */
 .distance-badge {
     display: inline-block; background: #e7f3ff; border: 1px solid #b3d7ff;
     border-radius: 6px; padding: 8px 14px; font-weight: 700; font-size: 16px;
@@ -361,7 +369,6 @@ body {
 .filter-container { background: white; border-radius: 12px; padding: 20px; margin-bottom: 20px; box-shadow: 0 2px 8px rgba(0,0,0,.08); }
 .filter-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px,1fr)); gap: 15px; margin-bottom: 15px; }
 
-/* Month badge */
 .month-badge { display:inline-block; background:#e7f3ff; color:#004085; border-radius:4px; padding:1px 6px; font-size:11px; font-weight:600; }
 .fy-badge { display:inline-block; background:#fff3cd; color:#856404; border-radius:4px; padding:1px 6px; font-size:11px; font-weight:600; margin-left:4px; }
 </style>
@@ -381,7 +388,7 @@ body {
     <div class="form-container">
         <form method="POST" id="logForm">
             <input type="hidden" name="action" value="create">
-            
+
             <div class="form-grid">
 
                 <div class="form-group">
@@ -389,10 +396,10 @@ body {
                     <select name="vehicle_id" id="vehicle_id" class="form-select" required>
                         <option value="">Select Vehicle</option>
                         <?php foreach ($vehicles as $vehicle): ?>
-                            <option value="<?= $vehicle['vehicle_id'] ?>" 
+                            <option value="<?= $vehicle['vehicle_id'] ?>"
                                     data-fuel-type="<?= $vehicle['fuel_type'] ?>"
                                     data-current-driver="<?= $vehicle_assignments[$vehicle['vehicle_id']]['driver_id'] ?? '' ?>">
-                                <?= htmlspecialchars($vehicle['vehicle_no']) ?> 
+                                <?= htmlspecialchars($vehicle['vehicle_no']) ?>
                                 (<?= ucfirst($vehicle['vehicle_type']) ?>)
                             </option>
                         <?php endforeach; ?>
@@ -405,7 +412,7 @@ body {
                         <option value="">Select Driver</option>
                         <?php foreach ($drivers as $driver): ?>
                             <option value="<?= $driver['driver_id'] ?>">
-                                <?= htmlspecialchars($driver['driver_name']) ?> 
+                                <?= htmlspecialchars($driver['driver_name']) ?>
                                 (<?= htmlspecialchars($driver['license_no']) ?>)
                             </option>
                         <?php endforeach; ?>
@@ -454,7 +461,7 @@ body {
 
                 <div class="form-group">
                     <label class="form-label required">End Meter (KM)</label>
-                    <input type="number" name="end_meter" id="end_meter" 
+                    <input type="number" name="end_meter" id="end_meter"
                            class="form-input" step="1" min="0" required>
                 </div>
 
@@ -466,7 +473,7 @@ body {
 
                 <div class="form-group">
                     <label class="form-label">Fuel Used (Est. Liters)</label>
-                    <input type="number" name="fuel_used_estimated" id="fuel_used_estimated" 
+                    <input type="number" name="fuel_used_estimated" id="fuel_used_estimated"
                            class="form-input" step="0.01" min="0">
                 </div>
 
@@ -481,9 +488,12 @@ body {
                 </div>
 
                 <div class="form-group">
-                    <label class="form-label required">Fiscal Year</label>
-                    <input type="text" name="fiscal_year" id="fiscal_year" class="form-input" value="" readonly required>
-                    <small style="color:#6c757d;margin-top:4px">Auto-calculated from From Date (Nepali) — not editable</small>
+                    <label class="form-label">Fiscal Year</label>
+                    <input type="text" id="fiscal_year_display" class="form-input" readonly
+                           value="Current active: <?= htmlspecialchars($active_fiscal_year ?? 'none set') ?>">
+                    <small style="color:#6c757d;margin-top:4px">
+                        Calculated on save from the From Date (English) against Fiscal Years — not user-editable.
+                    </small>
                 </div>
             </div>
 
@@ -540,7 +550,7 @@ body {
                     <label class="form-label">Month</label>
                     <select name="month_nep" class="form-select">
                         <option value="">All Months</option>
-                        <?php 
+                        <?php
                         $months = ['Baishakh','Jestha','Ashadh','Shrawan','Bhadra','Ashwin',
                                    'Kartik','Mangsir','Poush','Magh','Falgun','Chaitra'];
                         foreach ($months as $month): ?>
@@ -555,7 +565,7 @@ body {
                     <select name="vehicle_id" class="form-select">
                         <option value="">All Vehicles</option>
                         <?php foreach ($vehicles as $vehicle): ?>
-                            <option value="<?= $vehicle['vehicle_id'] ?>" 
+                            <option value="<?= $vehicle['vehicle_id'] ?>"
                                     <?= $filter_vehicle == $vehicle['vehicle_id'] ? 'selected' : '' ?>>
                                 <?= htmlspecialchars($vehicle['vehicle_no']) ?>
                             </option>
@@ -595,9 +605,9 @@ body {
                         <td colspan="12" style="text-align:center;padding:40px;color:#666">No logs found</td>
                     </tr>
                 <?php else: ?>
-                    <?php foreach ($logs as $idx => $log): 
+                    <?php foreach ($logs as $idx => $log):
                         $distance = (int)$log['end_meter'] - (int)$log['start_meter'];
-                        $expected_fy = get_fiscal_year_from_date($log['log_date_nep']);
+                        $expected_fy = get_fiscal_year_for_date($conn, $log['log_date_eng']);
                         $fy_mismatch = $expected_fy && $expected_fy !== $log['fiscal_year'];
                     ?>
                         <tr>
@@ -643,7 +653,7 @@ body {
                             <td><?= $log['fuel_used_estimated'] ? number_format((float)$log['fuel_used_estimated'], 2) . ' L' : '—' ?></td>
                             <td>
                                 <?php if ($log['from_location'] || $log['to_location']): ?>
-                                    <?= htmlspecialchars($log['from_location'] ?: '?') ?> → 
+                                    <?= htmlspecialchars($log['from_location'] ?: '?') ?> →
                                     <?= htmlspecialchars($log['to_location']   ?: '?') ?>
                                 <?php else: ?>
                                     —
@@ -666,28 +676,14 @@ const vehicleAssignments = <?= json_encode($vehicle_assignments) ?>;
 // Latest known end meter per vehicle — used to auto-fill start meter
 const vehicleLastMeter = <?= json_encode($vehicle_last_meter) ?>;
 
-// Month name lookup
+// Month name lookup (Nepali date -> month name only; fiscal year is server-computed
+// from the fiscal_years table, so it is intentionally NOT recomputed here anymore —
+// that duplicate client-side formula is exactly what caused the slash/hyphen mismatch).
 const nepMonths = {
     1:'Baishakh', 2:'Jestha', 3:'Ashadh', 4:'Shrawan',
     5:'Bhadra',   6:'Ashwin', 7:'Kartik', 8:'Mangsir',
     9:'Poush',   10:'Magh',  11:'Falgun', 12:'Chaitra'
 };
-
-// Nepali fiscal year runs Shrawan(4)..Chaitra(12) of year Y, then Baishakh(1)..Ashadh(3) of Y+1,
-// under fiscal-year label "Y/Y+1". Mirrors get_fiscal_year_from_date() on the server.
-function computeFiscalYear(nepDateStr) {
-    if (!nepDateStr) return null;
-    const val = nepDateStr.replace(/-/g, '.').replace(/\//g, '.');
-    const parts = val.split('.');
-    if (parts.length < 2) return null;
-    const year  = parseInt(parts[0], 10);
-    const month = parseInt(parts[1], 10);
-    if (!year || !month || month < 1 || month > 12) return null;
-    if (month >= 4) {
-        return year + '/' + String(year + 1).slice(-2);
-    }
-    return (year - 1) + '/' + String(year).slice(-2);
-}
 
 document.addEventListener('DOMContentLoaded', function () {
     const vehicleSelect   = document.getElementById('vehicle_id');
@@ -698,7 +694,6 @@ document.addEventListener('DOMContentLoaded', function () {
     const distDisplay     = document.getElementById('distance_display');
     const nepDateInput    = document.getElementById('log_date_nep');
     const monthPreview    = document.getElementById('nep_month_preview');
-    const fiscalYearInput = document.getElementById('fiscal_year');
 
     // Auto-fill current driver + previous end meter when vehicle is selected
     vehicleSelect.addEventListener('change', function () {
@@ -712,15 +707,12 @@ document.addEventListener('DOMContentLoaded', function () {
         }
     });
 
-    // Show month name + fiscal year preview as user types Nepali date
+    // Show month name preview as user types Nepali date
     function updateMonthPreview() {
         const val = nepDateInput.value.replace(/-/g, '.').replace(/\//g, '.');
         const parts = val.split('.');
         const mNum = parts.length >= 2 ? parseInt(parts[1], 10) : 0;
         monthPreview.textContent = nepMonths[mNum] || '—';
-
-        const fy = computeFiscalYear(nepDateInput.value);
-        fiscalYearInput.value = fy || '';
     }
     nepDateInput.addEventListener('input', updateMonthPreview);
 
@@ -737,7 +729,6 @@ document.addEventListener('DOMContentLoaded', function () {
             const adDot = NepaliFunctions.BS2AD(val, 'YYYY.MM.DD', 'YYYY.MM.DD');
             if (adDot) {
                 logDateEng.value = adDot.replace(/\./g, '-');
-                // Default the To date to the From date until the user picks a different To date
                 if (!toDateTouched) {
                     endNepInput.value = val;
                     endEngInput.value = logDateEng.value;
