@@ -27,6 +27,29 @@ function get_month_nep_from_date(string $nep_date): ?string {
 }
 
 /* ══════════════════════════════════════════════════
+   Helper: normalize a Nepali date to one canonical
+   format (YYYY.MM.DD, zero-padded) before it's stored.
+
+   Root cause fix: users have typed 2083.04.01, 2083-04-01,
+   2083/4/1 etc. interchangeably, so log_date_nep is not
+   consistent in the table. This doesn't break fiscal year
+   (that's derived from log_date_eng), but it makes the data
+   messy and unsortable as text. From now on every save goes
+   through this so new rows are always stored the same way.
+══════════════════════════════════════════════════ */
+function normalize_nep_date(string $raw): string {
+    $normalised = str_replace(['-', '/'], '.', trim($raw));
+    $parts = explode('.', $normalised);
+    if (count($parts) < 3 || !ctype_digit($parts[0]) || !ctype_digit($parts[1]) || !ctype_digit($parts[2])) {
+        // Malformed input — leave as typed rather than guessing, so it's
+        // still visible/flaggable in the report instead of silently mangled.
+        return trim($raw);
+    }
+    [$y, $m, $d] = array_map('intval', $parts);
+    return sprintf('%d.%02d.%02d', $y, $m, $d);
+}
+
+/* ══════════════════════════════════════════════════
    Helper: derive fiscal year from the DB, not by
    hand-formatting a string.
 
@@ -79,9 +102,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception("To date cannot be earlier than From date.");
             }
 
-            // Derive month_nep from the Nepali date, and fiscal_year from the
-            // authoritative fiscal_years table (never trust a posted value).
-            $month_nep   = get_month_nep_from_date($_POST['log_date_nep']);
+            // Normalize both Nepali dates to one consistent stored format,
+            // then derive month_nep from the normalized From date, and
+            // fiscal_year from the authoritative fiscal_years table
+            // (never trust a posted value for either).
+            $log_date_nep     = normalize_nep_date($_POST['log_date_nep']);
+            $log_end_date_nep = normalize_nep_date($_POST['log_end_date_nep']);
+            $month_nep   = get_month_nep_from_date($log_date_nep);
             $fiscal_year = get_fiscal_year_for_date($conn, $_POST['log_date_eng']);
             if (!$fiscal_year) {
                 throw new Exception("No fiscal year record in Fiscal Years covers {$_POST['log_date_eng']}. Please add/extend a fiscal year first.");
@@ -105,9 +132,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $stmt->execute([
                 ':vehicle_id'         => $_POST['vehicle_id'],
                 ':driver_id'          => $_POST['driver_id'] ?: null,
-                ':log_date_nep'       => $_POST['log_date_nep'],
+                ':log_date_nep'       => $log_date_nep,
                 ':log_date_eng'       => $_POST['log_date_eng'],
-                ':log_end_date_nep'   => $_POST['log_end_date_nep'],
+                ':log_end_date_nep'   => $log_end_date_nep,
                 ':log_end_date_eng'   => $_POST['log_end_date_eng'],
                 ':from_location'      => $_POST['from_location'] ?? null,
                 ':to_location'        => $_POST['to_location']   ?? null,
@@ -134,7 +161,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 throw new Exception("To date cannot be earlier than From date.");
             }
 
-            $month_nep   = get_month_nep_from_date($_POST['log_date_nep']);
+            $log_date_nep     = normalize_nep_date($_POST['log_date_nep']);
+            $log_end_date_nep = normalize_nep_date($_POST['log_end_date_nep']);
+            $month_nep   = get_month_nep_from_date($log_date_nep);
             $fiscal_year = get_fiscal_year_for_date($conn, $_POST['log_date_eng']);
             if (!$fiscal_year) {
                 throw new Exception("No fiscal year record in Fiscal Years covers {$_POST['log_date_eng']}. Please add/extend a fiscal year first.");
@@ -167,9 +196,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 ':log_id'             => $_POST['log_id'],
                 ':vehicle_id'         => $_POST['vehicle_id'],
                 ':driver_id'          => $_POST['driver_id'] ?: null,
-                ':log_date_nep'       => $_POST['log_date_nep'],
+                ':log_date_nep'       => $log_date_nep,
                 ':log_date_eng'       => $_POST['log_date_eng'],
-                ':log_end_date_nep'   => $_POST['log_end_date_nep'],
+                ':log_end_date_nep'   => $log_end_date_nep,
                 ':log_end_date_eng'   => $_POST['log_end_date_eng'],
                 ':from_location'      => $_POST['from_location'] ?? null,
                 ':to_location'        => $_POST['to_location']   ?? null,
