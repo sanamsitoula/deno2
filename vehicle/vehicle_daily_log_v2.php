@@ -702,9 +702,6 @@ body {
 // Vehicle assignments for auto-filling driver
 const vehicleAssignments = <?= json_encode($vehicle_assignments) ?>;
 
-// Latest known end meter per vehicle — used to auto-fill start meter
-const vehicleLastMeter = <?= json_encode($vehicle_last_meter) ?>;
-
 // Month name lookup (Nepali date -> month name only; fiscal year is server-computed
 // from the fiscal_years table, so it is intentionally NOT recomputed here anymore —
 // that duplicate client-side formula is exactly what caused the slash/hyphen mismatch).
@@ -724,16 +721,41 @@ document.addEventListener('DOMContentLoaded', function () {
     const nepDateInput    = document.getElementById('log_date_nep');
     const monthPreview    = document.getElementById('nep_month_preview');
 
-    // Auto-fill current driver + previous end meter when vehicle is selected
+    // Auto-fill current driver when vehicle is selected, and fetch that
+    // vehicle's last end meter LIVE from the server (not a page-load
+    // snapshot) so it always reflects the current DB state and so we can
+    // clearly say "no previous log" instead of silently doing nothing.
     vehicleSelect.addEventListener('change', function () {
         const vid = this.value;
         if (vid && vehicleAssignments[vid]) {
             driverSelect.value = vehicleAssignments[vid].driver_id;
         }
-        if (vid && vehicleLastMeter[vid] !== undefined) {
-            startMeter.value = vehicleLastMeter[vid];
-            recalculate();
+        if (!vid) {
+            document.getElementById('start_meter_hint').textContent =
+                "Auto-filled from the vehicle's last logged end meter (editable)";
+            return;
         }
+
+        document.getElementById('start_meter_hint').textContent = 'Checking last logged reading…';
+
+        fetch('get_last_meter.php?vehicle_id=' + encodeURIComponent(vid))
+            .then(res => res.json())
+            .then(data => {
+                if (data.found) {
+                    startMeter.value = data.end_meter;
+                    document.getElementById('start_meter_hint').textContent =
+                        `Auto-filled from last log on ${data.log_date_nep} (${data.log_date_eng}), editable`;
+                    recalculate();
+                } else {
+                    document.getElementById('start_meter_hint').textContent =
+                        'No previous log found for this vehicle — enter the starting reading manually';
+                }
+            })
+            .catch(err => {
+                console.error('Could not fetch last meter reading:', err);
+                document.getElementById('start_meter_hint').textContent =
+                    'Could not check last reading (see console) — enter it manually';
+            });
     });
 
     // Show month name preview as user types Nepali date
