@@ -456,7 +456,7 @@ body {
         <h4>Basic Information</h4>
         <div class="form-row">
             <div class="form-group">
-                <label for="bookSearch">Book: <span class="required">*</span></label>
+                <label for="bookSearch">Book: <span ></span></label>
                 <div class="search-dropdown">
                     <input type="text" class="dropdown-search" id="bookSearch" placeholder="Search books..." autocomplete="off"
                            value="<?= $edit_ticket ? $conn->query("SELECT CONCAT(book_code, ' - ', book_name) FROM books WHERE book_id = {$edit_ticket['book_id']}")->fetchColumn() : '' ?>">
@@ -476,7 +476,7 @@ body {
                 <div class="invalid-feedback">Please select a book</div>
             </div>
             <div class="form-group">
-                <label for="class">Class: <span class="required">*</span></label>
+                <label for="class">Class: <span ></span></label>
                 <input type="number" name="class" id="class" class="form-control"
                        value="<?= $edit_ticket ? htmlspecialchars($edit_ticket['class']) : '' ?>" required readonly>
                 <div class="invalid-feedback">Please select a book first</div>
