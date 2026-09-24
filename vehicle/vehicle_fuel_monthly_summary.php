@@ -77,6 +77,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
    FILTERS
 ══════════════════════════════════════════════════ */
 $f_fiscal    = $_GET['f_fiscal']    ?? $active_fiscal_year ?? '';
+// Some older tables (fuel_coupons / fuel_coupon_distributions) may still
+// store fiscal_year with a slash ("2082/83") while fiscal_years.fiscal_name
+// uses a hyphen ("2082-83"). Rather than requiring every table to be
+// backfilled, every fiscal_year comparison below normalizes both sides to
+// the same separator so a stored value in either format still matches.
+$f_fiscal_norm = str_replace('/', '-', $f_fiscal);
 $f_month     = $_GET['f_month']     ?? '';
 $f_vehicle   = $_GET['f_vehicle']   ?? '';
 $f_driver    = $_GET['f_driver']    ?? '';
@@ -133,7 +139,7 @@ $raw_sql = "
     WHERE fcd.deleted_at IS NULL AND fc.deleted_at IS NULL AND v.deleted_at IS NULL";
 
 $raw_params = [];
-if ($f_fiscal)    { $raw_sql .= " AND fcd.fiscal_year       = :rff"; $raw_params[':rff']=$f_fiscal; }
+if ($f_fiscal)    { $raw_sql .= " AND REPLACE(fcd.fiscal_year,'/','-') = :rff"; $raw_params[':rff']=$f_fiscal_norm; }
 if ($f_vehicle)   { $raw_sql .= " AND fc.vehicle_id         = :rfv"; $raw_params[':rfv']=$f_vehicle; }
 if ($f_fuel_type) { $raw_sql .= " AND fc.fuel_type          = :rft"; $raw_params[':rft']=$f_fuel_type; }
 if ($f_exp_type)  { $raw_sql .= " AND fc.fuel_expense_type  = :rfe"; $raw_params[':rfe']=$f_exp_type; }
@@ -224,7 +230,7 @@ if (empty($f_fuel_type) && empty($f_exp_type)) {
         WHERE vdl.deleted_at IS NULL
           AND vdl.month_nep IS NOT NULL AND TRIM(vdl.month_nep) <> ''";
     $lg_params = [];
-    if ($f_fiscal)  { $lg_sql .= " AND vdl.fiscal_year = :lgfy";  $lg_params[':lgfy']  = $f_fiscal; }
+    if ($f_fiscal)  { $lg_sql .= " AND REPLACE(vdl.fiscal_year,'/','-') = :lgfy";  $lg_params[':lgfy']  = $f_fiscal_norm; }
     if ($f_month)   { $lg_sql .= " AND vdl.month_nep   = :lgmn";  $lg_params[':lgmn']  = $f_month; }
     if ($f_vehicle) { $lg_sql .= " AND vdl.vehicle_id  = :lgvid"; $lg_params[':lgvid'] = $f_vehicle; }
     if ($f_driver)  {
@@ -259,7 +265,7 @@ if (!empty($summary)) {
     $vid_in = implode(',', array_map('intval', array_keys($summary)));
     $lw='WHERE vdl.deleted_at IS NULL AND vdl.vehicle_id IN ('.$vid_in.')';
     $lp=[];
-    if($f_fiscal){$lw.=" AND vdl.fiscal_year=:lffy";$lp[':lffy']=$f_fiscal;}
+    if($f_fiscal){$lw.=" AND REPLACE(vdl.fiscal_year,'/','-')=:lffy";$lp[':lffy']=$f_fiscal_norm;}
     if($f_month) {$lw.=" AND vdl.month_nep=:lfmn"; $lp[':lfmn']=$f_month;}
 
     $ls="SELECT vdl.vehicle_id,vdl.month_nep,MIN(vdl.start_meter) AS opening_meter,
@@ -289,7 +295,7 @@ if (!empty($summary)) {
           FROM vehicle_daily_logs vdl
           WHERE vdl.deleted_at IS NULL AND vdl.vehicle_id IN ($vid_in)
             AND (vdl.month_nep IS NULL OR TRIM(vdl.month_nep)='')";
-    if($f_fiscal) $ls2.=" AND vdl.fiscal_year=".$conn->quote($f_fiscal);
+    if($f_fiscal) $ls2.=" AND REPLACE(vdl.fiscal_year,'/','-')=".$conn->quote($f_fiscal_norm);
     $ls2.=" GROUP BY vdl.vehicle_id,dm HAVING CASE SPLIT_PART(REPLACE(REPLACE(TRIM(vdl.log_date_nep),'-','.'),'/','.'),'.',2)::INT WHEN 1 THEN 'Baishakh' WHEN 2 THEN 'Jestha' WHEN 3 THEN 'Ashadh' WHEN 4 THEN 'Shrawan' WHEN 5 THEN 'Bhadra' WHEN 6 THEN 'Ashwin' WHEN 7 THEN 'Kartik' WHEN 8 THEN 'Mangsir' WHEN 9 THEN 'Poush' WHEN 10 THEN 'Magh' WHEN 11 THEN 'Falgun' WHEN 12 THEN 'Chaitra' ELSE NULL END IS NOT NULL";
     try{
         foreach($conn->query($ls2)->fetchAll(PDO::FETCH_ASSOC) as $lr){
@@ -305,7 +311,7 @@ if (!empty($summary)) {
     try{
         $mvs="SELECT vehicle_id,month_nep,opening_meter,closing_meter,total_km
               FROM monthly_vehicle_summary WHERE vehicle_id IN ($vid_in) AND deleted_at IS NULL";
-        if($f_fiscal) $mvs.=" AND fiscal_year=".$conn->quote($f_fiscal);
+        if($f_fiscal) $mvs.=" AND REPLACE(fiscal_year,'/','-')=".$conn->quote($f_fiscal_norm);
         foreach($conn->query($mvs)->fetchAll(PDO::FETCH_ASSOC) as $mr){
             $vid=$mr['vehicle_id'];$mon=$mr['month_nep'];
             if(isset($summary[$vid][$mon])&&($summary[$vid][$mon]['opening_meter']===null||$summary[$vid][$mon]['opening_meter']==0)){
@@ -331,7 +337,7 @@ if(!empty($summary)){
           FROM vehicle_maintenance_records vmr
           JOIN maintenance_types mt ON mt.maintenance_type_id=vmr.maintenance_type_id
           WHERE vmr.vehicle_id IN ($vid_in) AND vmr.deleted_at IS NULL";
-    if($f_fiscal) $ms.=" AND vmr.fiscal_year=".$conn->quote($f_fiscal);
+    if($f_fiscal) $ms.=" AND REPLACE(vmr.fiscal_year,'/','-')=".$conn->quote($f_fiscal_norm);
     $ms.=" ORDER BY vmr.maintenance_date_nep";
     try{
         foreach($conn->query($ms)->fetchAll(PDO::FETCH_ASSOC) as $mr){
