@@ -83,6 +83,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                // Class-level validation removed: some books have no class_level,
+                // so an empty submitted value is stored as NULL instead of being
+                // rejected (Postgres won't accept "" for an integer column).
+                $classValue = (isset($_POST['class']) && $_POST['class'] !== '') ? $_POST['class'] : null;
+
                 $stmt = $conn->prepare("
                     INSERT INTO job_ticket (
                         book_id, job_ticket_code, lot, remarks, description,
@@ -98,7 +103,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['description'],
                     $_POST['print_qty'],
                     $totalPages,
-                    $_POST['class'],
+                    $classValue,
                     $_POST['date_nep'],
                     $_POST['date_eng'],
                     $_SESSION['user_id'],
@@ -149,6 +154,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     }
                 }
 
+                // Class-level validation removed — same NULL handling as create.
+                $classValue = (isset($_POST['class']) && $_POST['class'] !== '') ? $_POST['class'] : null;
+
                 $stmt = $conn->prepare("
                     UPDATE job_ticket SET
                         book_id = ?, remarks = ?, description = ?,
@@ -162,7 +170,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     $_POST['description'],
                     $_POST['print_qty'],
                     $totalPages,
-                    $_POST['class'],
+                    $classValue,
                     $_POST['date_nep'],
                     $_POST['date_eng'],
                     $_SESSION['user_id'],
@@ -251,6 +259,7 @@ $job_tickets = $conn->query("
 ")->fetchAll();
 ?>
 
+<link href="https://nepalidatepicker.sajanmaharjan.com.np/v5/nepali.datepicker/css/nepali.datepicker.v5.0.6.min.css" rel="stylesheet"/>
 <style>
 /* --- Styles --- */
 body {
@@ -478,8 +487,7 @@ body {
             <div class="form-group">
                 <label for="class">Class: <span ></span></label>
                 <input type="number" name="class" id="class" class="form-control"
-                       value="<?= $edit_ticket ? htmlspecialchars($edit_ticket['class']) : '' ?>" required readonly>
-                <div class="invalid-feedback">Please select a book first</div>
+                       value="<?= $edit_ticket ? htmlspecialchars($edit_ticket['class']) : '' ?>" readonly>
             </div>
         </div>
         <div class="form-row">
@@ -509,7 +517,8 @@ body {
             </div>
             <div class="form-group">
                 <label for="date_nep">Date (Nepali YYYY-MM-DD): <span class="required">*</span></label>
-                <input type="text" name="date_nep" id="date_nep" class="form-control"
+                <input type="text" name="date_nep" id="date_nep" class="form-control" autocomplete="off"
+                       placeholder="Click to pick a date"
                        value="<?= $edit_ticket ? htmlspecialchars($edit_ticket['date_nep']) : '' ?>" required>
                 <div class="invalid-feedback">Please enter a valid date</div>
             </div>
@@ -517,6 +526,7 @@ body {
                 <label for="date_eng">Date (English): <span class="required">*</span></label>
                 <input type="date" name="date_eng" id="date_eng" class="form-control"
                        value="<?= $edit_ticket ? htmlspecialchars($edit_ticket['date_eng']) : date('Y-m-d') ?>" required>
+                <small style="color:#6c757d">Auto-filled from the Nepali date above (editable)</small>
                 <div class="invalid-feedback">Please enter a valid date</div>
             </div>
         </div>
@@ -685,6 +695,7 @@ body {
     </table>
 </div>
 
+<script src="https://nepalidatepicker.sajanmaharjan.com.np/v5/nepali.datepicker/js/nepali.datepicker.v5.0.6.min.js"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     const pageQtyInput = document.getElementById('page_qty');
@@ -699,6 +710,33 @@ document.addEventListener('DOMContentLoaded', function() {
     const lotHistoryContent = document.getElementById('lotHistoryContent');
     const fiscalYearId = <?= $fiscalYearId ?>;
     window.currentFormas = [];
+
+    // --- Nepali calendar on Date (Nepali) + auto-fill Date (English) ---
+    // Uses the same nepalidatepicker library as the vehicle daily log form.
+    // Format kept as YYYY-MM-DD to match what's already stored in date_nep.
+    const dateNepInput = document.getElementById('date_nep');
+    const dateEngInput = document.getElementById('date_eng');
+
+    function updateEngFromNep() {
+        const val = dateNepInput.value.trim();
+        if (!val) return;
+        try {
+            const ad = NepaliFunctions.BS2AD(val, 'YYYY-MM-DD', 'YYYY-MM-DD');
+            if (ad) dateEngInput.value = ad;
+        } catch (e) {
+            console.warn('Could not convert Nepali date to English:', e);
+        }
+    }
+
+    if (dateNepInput && typeof dateNepInput.NepaliDatePicker === 'function') {
+        dateNepInput.NepaliDatePicker({
+            dateFormat: 'YYYY-MM-DD',
+            onDateSelect: updateEngFromNep
+        });
+    }
+    if (dateNepInput) {
+        dateNepInput.addEventListener('blur', updateEngFromNep);
+    }
 
     // Calculate total pages and print qty
     function calculateTotals() {

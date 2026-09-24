@@ -374,6 +374,8 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
                                 <option value="JEMC" <?= ($edit_book && $edit_book['business_associated'] == 'JEMC') ? 'selected' : '' ?>>JEMC – Janak Education Materials Centre</option>
                                 <option value="NTC"  <?= ($edit_book && $edit_book['business_associated'] == 'NTC')  ? 'selected' : '' ?>>NTC – Nepal Telecom</option>
                                 <option value="NEB"  <?= ($edit_book && $edit_book['business_associated'] == 'NEB')  ? 'selected' : '' ?>>NEB – National Examination Board</option>
+                                <option value="Others"  <?= ($edit_book && $edit_book['business_associated'] == 'Others')  ? 'selected' : '' ?>>NEB – National Examination Board</option>
+                            
                             </select>
                         </div>
                         <div class="col-md-6">
@@ -385,6 +387,7 @@ require_once $_SERVER['DOCUMENT_ROOT'] . '/deno2/includes/header.php';
                                 <option value="Copy"          <?= ($edit_book && $edit_book['book_type'] == 'Copy')          ? 'selected' : '' ?>>Copy</option>
                                 <option value="RechargeCard"  <?= ($edit_book && $edit_book['book_type'] == 'RechargeCard')  ? 'selected' : '' ?>>Recharge Card</option>
                                 <option value="Lalpurja"      <?= ($edit_book && $edit_book['book_type'] == 'Lalpurja')      ? 'selected' : '' ?>>Lalpurja</option>
+                                <option value="Others" <?= ($edit_book && $edit_book['book_type'] == 'Others') ? 'selected' : '' ?>>Others</option>
                                 <option value="QuestionPaper" <?= ($edit_book && $edit_book['book_type'] == 'QuestionPaper') ? 'selected' : '' ?>>Question Paper</option>
                             </select>
                         </div>
